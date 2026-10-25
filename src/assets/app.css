@@ -385,3 +385,9 @@ button svg, a svg { flex: 0 0 auto; }
 :root[data-theme="dark"] .dialog-overlay { background: #090f0bc2; }
 :root[data-theme="dark"] .legend-dot.green { background: var(--chart-good); }
 :root[data-theme="dark"] .legend-dot.amber { background: var(--chart-bad); }
+
+.camera-footer { flex-wrap: wrap; }
+.camera-mode-select { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
+.camera-mode-select select { color: inherit; background: var(--night-soft, #f8f8ef); border: 1px solid var(--night-border, #c7cfb8); border-radius: 4px; padding: 5px 6px; font-size: 11px; cursor: pointer; }
+.camera-inline-controls { margin-left: auto; }
+.blink-diagnostics { padding: 12px 0; font-size: 11px; line-height: 1.9; color: var(--night-muted, #77816b); }

@@ -5,6 +5,8 @@ import { classify, makeCalibration, observe, smoothFeatures } from '@/domain/pos
 import * as storage from '@/lib/storage'
 import { dailyStats, downloadFile, localDay } from '@/lib/format'
 import { DEMO_FEATURES, demoCalibration } from '@/lib/demo'
+import { BlinkTracker } from '@/domain/blink'
+import { playReminder } from '@/lib/audio'
 import { cameraError, VisionCamera } from '@/lib/vision'
 
 export const useMonitorStore = defineStore('monitor', () => {
@@ -39,6 +41,10 @@ export const useMonitorStore = defineStore('monitor', () => {
   const continuousSeconds = ref(0)
   const blinkRate = ref<number | null>(null)
   const blinkAvailable = ref(false)
+  const blinkCount = ref(0)
+  const blinkObservedSeconds = ref(0)
+  const blinkStatus = ref('开启眨眼参考后开始采集')
+  const blinkTracker = new BlinkTracker()
   const toast = ref<{ title: string; message: string; kind: 'info' | 'reminder' | 'error' } | null>(null)
   const restOpen = ref(false)
   const restRemaining = ref(0)
@@ -59,11 +65,8 @@ export const useMonitorStore = defineStore('monitor', () => {
   let calibrationBuffer: Features[] = []
   let restEnd = 0
   let nextBreak = 0
-  let lastBlinkSample = 0
-  let closedEyeSince: number | null = null
-  let blinkTimes: number[] = []
-  let faceTimes: { at: number; dt: number }[] = []
   let audio: AudioContext | null = null
+  let blinkFaceMissing = true
   let profileMismatch = false
   let saving = Promise.resolve()
   const lastReminder: Record<ReminderKind, number> = { posture: -Infinity, break: -Infinity, eyes: -Infinity }
@@ -139,10 +142,10 @@ export const useMonitorStore = defineStore('monitor', () => {
     lastFrame = 0
     lastSmooth = 0
     badSince = goodSince = absentSince = null
-    closedEyeSince = null
-    lastBlinkSample = 0
-    blinkTimes = []
-    faceTimes = []
+    blinkTracker.reset()
+    blinkFaceMissing = true
+    blinkCount.value = blinkObservedSeconds.value = 0
+    blinkStatus.value = '等待清晰双眼与连续采样'
     blinkRate.value = null
     quality.value = 0
     landmarks.value = []
@@ -182,6 +185,7 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   function tick() {
+    if (settings.value.blinkEnabled && blinkAvailable.value && phase.value === 'monitoring') showBlink(performance.now())
     const now = performance.now()
     const gap = Math.max(0, (now - lastTick) / 1000)
     const dt = Math.min(gap, 1.5)
@@ -353,25 +357,26 @@ export const useMonitorStore = defineStore('monitor', () => {
     frameHeight.value = frame.height
     inferenceMs.value = frame.inferenceMs
     handleObservation(frame.landmarks, lastFrame, frame.width, frame.height)
-    if (settings.value.blinkEnabled && blinkAvailable.value && phase.value === 'monitoring') handleBlink(frame.blink, lastFrame)
+    if (settings.value.blinkEnabled && blinkAvailable.value && phase.value === 'monitoring') handleBlink(frame.blink, frame.timestamp)
+  }
+
+  function showBlink(now: number, faceMissing = blinkFaceMissing) {
+    const result = blinkTracker.snapshot(now)
+    blinkRate.value = result.rate
+    blinkCount.value = result.count
+    blinkObservedSeconds.value = Math.floor(result.seconds)
+    blinkStatus.value = faceMissing ? '未看清双眼，请面向摄像头并改善光线'
+      : !result.fresh || result.fps < 8 ? '采样不足或较慢，暂不估算频率'
+      : result.seconds < 20 ? '正在积累有效观察（至少 20 秒）'
+      : '正在估算近期频率，短促眨眼仍可能漏计'
+    return result
   }
 
   function handleBlink(score: number | null, now: number) {
-    if (score === null) { closedEyeSince = null; lastBlinkSample = 0; blinkRate.value = null; return }
-    const dt = lastBlinkSample ? Math.min(0.3, (now - lastBlinkSample) / 1000) : 0
-    lastBlinkSample = now
-    faceTimes.push({ at: now, dt })
-    faceTimes = faceTimes.filter((t) => now - t.at <= 60000)
-    if (score > 0.55) closedEyeSince ??= now
-    if (score < 0.25 && closedEyeSince !== null) {
-      const closed = now - closedEyeSince
-      if (closed >= 40 && closed <= 1200) blinkTimes.push(now)
-      closedEyeSince = null
-    }
-    blinkTimes = blinkTimes.filter((t) => now - t <= 60000)
-    const reliable = faceTimes.reduce((sum, t) => sum + t.dt, 0)
-    blinkRate.value = reliable >= 20 ? Math.round(blinkTimes.length * 60 / reliable) : null
-    if (reliable >= 30 && blinkRate.value !== null && blinkRate.value < 8) remind('eyes', '看看远处，放松一下眼睛')
+    blinkFaceMissing = score === null
+    blinkTracker.update(score, now)
+    const result = showBlink(now, score === null)
+    if (result.seconds >= 30 && result.rate !== null && result.rate < 8) remind('eyes', '看看远处，放松一下眼睛')
   }
 
   function beginCalibration() {
@@ -400,7 +405,9 @@ export const useMonitorStore = defineStore('monitor', () => {
       feature.value = null
       lastSmooth = 0
       void queueSave(() => storage.saveCalibration(result))
-      announce('校准完成', '换机位或坐得更近时，可以随时重新校准。')
+      announce('校准完成', result.view === 'side' && result.baseline.torso === null
+        ? '已建立侧面头颈参考；髋部未持续清晰入镜，本次不判断躯干。'
+        : '换机位或坐得更近时，可以随时重新校准。')
     } catch (failure) {
       phase.value = 'ready'
       state.value = 'need_cal'
@@ -463,22 +470,17 @@ export const useMonitorStore = defineStore('monitor', () => {
     try { audio ??= new AudioContext(); void audio.resume() } catch { audio = null }
   }
 
-  function playCue() {
-    if (!settings.value.soundEnabled) return
+  async function playCue(preview = false) {
+    if (!preview && !settings.value.soundEnabled) return
     prepareAudio()
-    if (!audio) return
-    const oscillator = audio.createOscillator()
-    const gain = audio.createGain()
-    oscillator.connect(gain)
-    gain.connect(audio.destination)
-    oscillator.frequency.value = 528
-    gain.gain.setValueAtTime(0, audio.currentTime)
-    gain.gain.linearRampToValueAtTime(0.06, audio.currentTime + 0.025)
-    gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.3)
-    oscillator.start()
-    oscillator.stop(audio.currentTime + 0.32)
-    oscillator.onended = () => { oscillator.disconnect(); gain.disconnect() }
+    if (!audio) { announce('声音暂不可用', '请检查浏览器与系统音量。', 'error'); return }
+    try {
+      await audio.resume()
+      playReminder(audio, settings.value.soundVolume, settings.value.soundRepeats)
+    } catch { announce('声音暂不可用', '请点击试听并检查系统音量。', 'error') }
   }
+
+  function previewSound() { void playCue(true) }
 
   function remind(kind: ReminderKind, message: string) {
     const now = performance.now()
@@ -487,7 +489,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     lastReminder[kind] = now
     session.value?.reminders.push({ at: Date.now(), kind, message })
     announce(kind === 'posture' ? '坐得舒服一些' : kind === 'eyes' ? '给眼睛一点休息' : '该活动一下了', message, 'reminder')
-    playCue()
+    void playCue()
     if (settings.value.notificationsEnabled && !demo.value && 'Notification' in window && Notification.permission === 'granted') {
       try { new Notification('PinEase · 青松坐姿', { body: message, tag: 'pinease-' + kind, icon: new URL(import.meta.env.BASE_URL + 'icon.svg', window.location.href).href }) } catch { /* 页面提醒继续可用 */ }
     }
@@ -570,10 +572,10 @@ export const useMonitorStore = defineStore('monitor', () => {
     settings, profiles, sessions, records, phase, state, reason, error, storageWarning, initialized, busy, running,
     demo, demoPose, stream, landmarks, frameWidth, frameHeight, quality, inferenceMs, engine, devices,
     calibrationProgress, calibrationSamples, feature, deviation, session, today, elapsed, profile,
-    continuousSeconds, blinkRate, blinkAvailable, toast, restOpen, restRemaining, restKind, stateLabel, stateColor,
+    continuousSeconds, blinkRate, blinkAvailable, blinkCount, blinkObservedSeconds, blinkStatus, toast, restOpen, restRemaining, restKind, stateLabel, stateColor,
     init, startCamera, startDemo, beginCalibration, pause, resume, endSession, updateSettings, refreshDevices,
     requestNotifications, resetProfiles, exportBackup, exportCSV, importBackup, deleteHistory, dismissToast,
-    closeRest, announce,
+    closeRest, announce, previewSound,
   }
 })
 

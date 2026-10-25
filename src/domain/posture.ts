@@ -3,7 +3,7 @@ import type { Calibration, Features, Landmark, Observation, Settings, TrackingSi
 const QUALITY = 0.55
 const degrees = (radians: number) => radians * 180 / Math.PI
 const quality = (p: Landmark | undefined) => p ? Math.min(p.visibility ?? 1, p.presence ?? 1) : 0
-const usable = (p: Landmark | undefined): p is Landmark => !!p && Number.isFinite(p.x) && Number.isFinite(p.y) && quality(p) >= QUALITY
+const usable = (p: Landmark | undefined): p is Landmark => !!p && Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1 && quality(p) >= QUALITY
 
 function angle(lower: Landmark, upper: Landmark, width: number, height: number): number | null {
   const dx = (upper.x - lower.x) * width
@@ -13,12 +13,13 @@ function angle(lower: Landmark, upper: Landmark, width: number, height: number):
 
 export function observe(points: Landmark[], width: number, height: number, view: ViewMode, fixedSide?: TrackingSide): Observation {
   const unknown = (reason: string, noPerson = false): Observation => ({ valid: false, noPerson, reason, features: null, quality: 0 })
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return unknown('画面尺寸无效，请重新打开摄像头')
   if (!points.length) return unknown('画面里暂时未检测到人', true)
   const nose = points[0]
   const ls = points[11]
   const rs = points[12]
-  const leftScore = Math.min(quality(points[7]), quality(ls))
-  const rightScore = Math.min(quality(points[8]), quality(rs))
+  const leftScore = usable(points[7]) && usable(ls) ? Math.min(quality(points[7]), quality(ls)) : 0
+  const rightScore = usable(points[8]) && usable(rs) ? Math.min(quality(points[8]), quality(rs)) : 0
   const side = fixedSide ?? (leftScore >= rightScore ? 'left' : 'right')
   const ear = points[side === 'left' ? 7 : 8]
   const shoulder = points[side === 'left' ? 11 : 12]
@@ -34,10 +35,12 @@ export function observe(points: Landmark[], width: number, height: number, view:
   if (view === 'front' && span < width * 0.08) return unknown('双肩太小或角度偏侧，请调整摄像头')
   const features: Features = {
     neck, torso, side,
-    drop: usable(nose) && span > 3 ? (nose.y - centerY) * height / span : 0,
-    shift: usable(nose) && span > 3 ? (nose.x - centerX) * width / span : 0,
-    shoulders: usable(ls) && usable(rs) ? degrees(Math.atan2((rs.y - ls.y) * height, Math.abs(rs.x - ls.x) * width)) : 0,
-    scale: span / width,
+    // Front-facing features become ill-conditioned when the shoulders overlap in profile.
+    // Side monitoring only uses neck/torso angles; do not derive ratios from that tiny span.
+    drop: view === 'front' && usable(nose) && span > 3 ? (nose.y - centerY) * height / span : 0,
+    shift: view === 'front' && usable(nose) && span > 3 ? (nose.x - centerX) * width / span : 0,
+    shoulders: view === 'front' && usable(ls) && usable(rs) ? degrees(Math.atan2((rs.y - ls.y) * height, Math.abs(rs.x - ls.x) * width)) : 0,
+    scale: view === 'front' ? span / width : 0,
   }
   const q = view === 'front' ? Math.min(quality(nose), quality(ls), quality(rs)) : Math.min(quality(ear), quality(shoulder))
   return { valid: true, noPerson: false, reason: '', features, quality: q }
@@ -71,22 +74,23 @@ function median(values: number[]): number {
 
 export function makeCalibration(samples: Features[], view: ViewMode, cameraId: string, aspect: number): Calibration {
   const side: TrackingSide = samples.filter((s) => s.side === 'left').length >= samples.length / 2 ? 'left' : 'right'
-  const valid = samples.filter((s) => s.side === side)
+  const valid = view === 'side' ? samples.filter((s) => s.side === side) : samples
   if (valid.length < 20) throw new Error('有效样本还不够。调整好机位后再试一次。')
   const spread = (values: number[]) => {
     const m = median(values)
     return median(values.map((v) => Math.abs(v - m)))
   }
-  if (spread(valid.map((s) => s.drop)) > 0.045 || spread(valid.map((s) => s.shoulders)) > 3.5) {
+  if (view === 'front' && (spread(valid.map((s) => s.drop)) > 0.045 || spread(valid.map((s) => s.shoulders)) > 3.5)) {
     throw new Error('刚才的姿态变化较多。保持舒适坐姿，再校准一次。')
   }
   const necks = valid.flatMap((s) => s.neck === null ? [] : [s.neck])
   if (view === 'side' && (necks.length < 20 || spread(necks) > 4)) throw new Error('侧面关键点不够稳定，请调整光线和机位。')
   const torsos = valid.flatMap((s) => s.torso === null ? [] : [s.torso])
+  const stableTorso = torsos.length >= Math.max(20, Math.ceil(valid.length / 2)) && spread(torsos) <= 4
   return {
     id: cameraId + ':' + view, view, cameraId, aspect, side, createdAt: Date.now(), sampleCount: valid.length,
     baseline: {
-      side, neck: necks.length ? median(necks) : null, torso: torsos.length >= 20 ? median(torsos) : null,
+      side, neck: necks.length ? median(necks) : null, torso: stableTorso ? median(torsos) : null,
       drop: median(valid.map((s) => s.drop)), shift: median(valid.map((s) => s.shift)),
       shoulders: median(valid.map((s) => s.shoulders)), scale: median(valid.map((s) => s.scale)),
     },
@@ -94,7 +98,7 @@ export function makeCalibration(samples: Features[], view: ViewMode, cameraId: s
 }
 
 export function smoothFeatures(previous: Features | null, next: Features, dt: number): Features {
-  if (!previous || dt > 1.5) return next
+  if (!previous || previous.side !== next.side || dt > 1.5) return next
   const alpha = 1 - Math.exp(-Math.max(0.001, dt) / 0.35)
   const blend = (a: number, b: number) => a + alpha * (b - a)
   return {

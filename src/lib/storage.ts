@@ -70,6 +70,8 @@ export function sanitizeSettings(value: unknown): Settings {
     sitMinutes: bounded(v.sitMinutes, 10, 120, defaults.sitMinutes),
     restSeconds: bounded(v.restSeconds, 20, 300, defaults.restSeconds),
     breakEnabled: flag('breakEnabled'), soundEnabled: flag('soundEnabled'),
+    soundVolume: bounded(v.soundVolume, 0, 100, defaults.soundVolume),
+    soundRepeats: Math.round(bounded(v.soundRepeats, 1, 3, defaults.soundRepeats)),
     notificationsEnabled: flag('notificationsEnabled'), focusReminder: flag('focusReminder'),
     blinkEnabled: flag('blinkEnabled'), fps: bounded(v.fps, 5, 20, defaults.fps),
   }

@@ -26,6 +26,8 @@ export interface Settings {
   restSeconds: number
   breakEnabled: boolean
   soundEnabled: boolean
+  soundVolume: number
+  soundRepeats: number
   notificationsEnabled: boolean
   focusReminder: boolean
   blinkEnabled: boolean
@@ -129,6 +131,8 @@ export const DEFAULT_SETTINGS: Settings = {
   restSeconds: 60,
   breakEnabled: true,
   soundEnabled: false,
+  soundVolume: 70,
+  soundRepeats: 2,
   notificationsEnabled: false,
   focusReminder: false,
   blinkEnabled: false,

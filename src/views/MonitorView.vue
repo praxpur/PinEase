@@ -20,7 +20,9 @@ async function primary() {
 const statusDescription = computed(() => {
   if (store.phase === 'idle') return '先花几秒找到舒服的坐姿。之后，让提醒轻一点，让专注久一点。'
   if (store.phase === 'loading') return '首次准备可能需要一点时间。你的画面始终留在这台设备上。'
-  if (store.phase === 'calibrating') return '保持你觉得舒服的坐姿，头部和肩膀尽量保持稳定。'
+  if (store.phase === 'calibrating') return store.settings.view === 'side'
+    ? '保持舒适坐姿，让同一侧耳朵和肩膀清晰入镜；髋部不入镜也可以校准头颈。'
+    : '保持你觉得舒服的坐姿，头部和肩膀尽量保持稳定。'
   if (store.phase === 'paused') return '摄像头已关闭。准备好了，再继续刚才的专注。'
   if (store.demo) return '这是模拟的监测过程，不会打开摄像头，也不会写入真实历史。'
   return store.reason
@@ -59,7 +61,7 @@ const statusDescription = computed(() => {
         <p class="state-description">{{ statusDescription }}</p>
         <div class="session-time"><span>本次有效监测</span><strong>{{ clock(store.elapsed) }}</strong></div>
         <div v-if="store.phase === 'calibrating'" class="sample-note">已收集 {{ store.calibrationSamples }} 个有效样本</div>
-        <div v-else-if="store.phase === 'ready'" class="setup-note"><span>01</span><p>{{ store.settings.view === 'front' ? '让头部与双肩进入画面，舒适地坐好，然后开始校准。' : '让摄像头看清一侧的耳朵与肩膀，坐好后开始校准。' }}</p></div>
+        <div v-else-if="store.phase === 'ready'" class="setup-note"><span>01</span><p>{{ store.settings.view === 'front' ? '让头部与双肩进入画面，舒适地坐好，然后开始校准。' : '让摄像头看清同一侧的耳朵与肩膀；半身画面也可以校准头颈，无需双肩展开或髋部入镜。' }}</p></div>
         <div v-else-if="store.running && !store.demo" class="signal-line"><span class="status-dot" :class="store.quality >= 0.55 ? 'on' : ''" />{{ store.quality >= 0.55 ? '关键点清晰' : '等待清晰画面' }}<span>{{ store.settings.view === 'front' ? '正面参考' : '侧面参考' }}</span></div>
         <button v-if="store.phase === 'ready'" class="button button-primary calibration-button" @click="store.beginCalibration"><ScanLine :size="16" />开始 8 秒校准</button>
         <button v-if="store.phase === 'monitoring' && !store.demo" class="recalibrate-button" @click="store.beginCalibration"><ScanLine :size="15" />重新校准<ChevronRight :size="14" /></button>
@@ -77,7 +79,7 @@ const statusDescription = computed(() => {
         <div><span class="metric-label">有效监测</span><strong>{{ duration(store.today.effectiveSeconds) }}</strong><p>清晰识别下的在座记录</p></div>
         <div><span class="metric-label">参考坐姿占比</span><strong>{{ store.today.ratio === null ? '—' : Math.round(store.today.ratio * 100) + '%' }}</strong><p>正常时长 / 有效监测时长</p></div>
         <div><span class="metric-label">轻提醒</span><strong>{{ store.today.reminders }}<small> 次</small></strong><p>姿态、休息与护眼提醒</p></div>
-        <div v-if="store.settings.blinkEnabled"><span class="metric-label">眨眼参考频率</span><strong>{{ store.blinkRate === null ? '—' : store.blinkRate }}<small v-if="store.blinkRate !== null"> 次/分</small></strong><p>{{ store.blinkAvailable ? '近期清晰人脸下的估计' : '开启真实监测后开始采集' }}</p></div>
+        <div v-if="store.settings.blinkEnabled"><span class="metric-label">眨眼参考频率</span><strong>{{ store.blinkRate === null ? '—' : store.blinkRate }}<small v-if="store.blinkRate !== null"> 次/分</small></strong><p>{{ store.blinkAvailable ? store.blinkStatus : '开启真实监测后开始采集' }}</p><p>已识别 {{ store.blinkCount }} 次 · 有效观察 {{ store.blinkObservedSeconds }} 秒</p></div>
       </div>
       <p v-if="store.demo" class="demo-footnote">当前展示的是演示数据，与真实记录分开。</p>
     </section>

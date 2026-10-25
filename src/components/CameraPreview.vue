@@ -10,6 +10,12 @@ const hasPreview = computed(() => !!store.stream && store.settings.showPreview)
 const connections = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [7, 11], [8, 12]]
 let resize: ResizeObserver | null = null
 
+async function changeView(event: Event) {
+  const view = (event.target as HTMLSelectElement).value
+  if (view !== 'front' && view !== 'side') return
+  if (store.demo && store.phase !== 'idle') await store.endSession()
+  await store.updateSettings({ view })
+}
 async function attach() {
   if (!video.value) return
   video.value.srcObject = store.stream
@@ -73,7 +79,7 @@ onBeforeUnmount(() => { resize?.disconnect(); if (video.value) video.value.srcOb
       <video ref="video" autoplay muted playsinline :class="{ invisible: !hasPreview }" />
       <canvas ref="canvas" :class="{ invisible: !hasPreview }" />
       <div v-if="!hasPreview" class="camera-placeholder">
-        <PostureIllustration v-if="!store.stream && store.phase !== 'paused'" :bad="store.demo && store.demoPose === 'bad'" />
+        <PostureIllustration v-if="!store.stream && store.phase !== 'paused'" :view="store.demo && store.phase !== 'idle' ? 'front' : store.settings.view" :bad="store.demo && store.phase !== 'idle' && store.demoPose === 'bad'" />
         <template v-else><CameraOff :size="36" :stroke-width="1.25" /><p>{{ store.phase === 'paused' ? '给自己一点休息' : '画面已隐藏，监测仍在进行' }}</p></template>
         <span v-if="store.demo && store.demoPose === 'absent'" class="demo-absent">演示：已离开座位</span>
       </div>
@@ -84,7 +90,7 @@ onBeforeUnmount(() => { resize?.disconnect(); if (video.value) video.value.srcOb
         <div class="calibration-track"><i :style="{ width: store.calibrationProgress + '%' }" /></div>
       </div>
     </div>
-    <div class="camera-footer"><span><ShieldCheck :size="14" />画面只在当前设备处理</span><span v-if="store.running || store.phase === 'paused'" class="camera-inline-controls"><button v-if="store.phase !== 'calibrating'" @click="store.phase === 'paused' ? store.resume() : store.pause()"><Play v-if="store.phase === 'paused'" :size="12" /><Pause v-else :size="12" />{{ store.phase === 'paused' ? '继续' : '暂停' }}</button><button @click="store.endSession"><Square :size="10" />结束</button></span><span v-else><Camera :size="14" />{{ store.demo ? '正面演示' : store.settings.view === 'front' ? '正面机位' : '侧面机位' }}</span></div>
+    <div class="camera-footer"><span><ShieldCheck :size="14" />画面只在当前设备处理</span><span v-if="store.running || store.phase === 'paused'" class="camera-inline-controls"><button v-if="store.phase !== 'calibrating'" @click="store.phase === 'paused' ? store.resume() : store.pause()"><Play v-if="store.phase === 'paused'" :size="12" /><Pause v-else :size="12" />{{ store.phase === 'paused' ? '继续' : '暂停' }}</button><button @click="store.endSession"><Square :size="10" />结束</button></span><label class="camera-mode-select"><Camera :size="14" /><span class="sr-only">监测模式</span><select aria-label="监测模式" title="切换模式会结束当前监测，请按新机位重新开始" :value="store.demo && store.phase !== 'idle' ? 'front' : store.settings.view" :disabled="store.busy || store.phase === 'calibrating'" @change="changeView"><option value="front">正面模式</option><option value="side">侧面模式</option></select></label></div>
   </div>
 </template>
 

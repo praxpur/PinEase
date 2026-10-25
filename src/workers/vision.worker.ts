@@ -1,4 +1,5 @@
 import { FaceLandmarker, FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
+import { readBlinkScore } from '@/domain/blink'
 import type { Landmark, VisionReply } from '@/domain/types'
 
 interface WorkerContext {
@@ -12,6 +13,7 @@ let face: FaceLandmarker | null = null
 let delegate: 'GPU' | 'CPU' = 'CPU'
 let processing = false
 let lastTimestamp = -1
+let faceFrameWarning = false
 
 async function initialize(data: { assets: string; blink: boolean }) {
   pose?.close()
@@ -19,6 +21,7 @@ async function initialize(data: { assets: string; blink: boolean }) {
   pose = null
   face = null
   lastTimestamp = -1
+  faceFrameWarning = false
   // This is an ES module Worker: the classic loader does not publish ModuleFactory here.
   const files = await FilesetResolver.forVisionTasks(data.assets + 'wasm', true)
   // ES modules run once, but MediaPipe consumes and clears this factory per task.
@@ -79,11 +82,14 @@ scope.onmessage = async (event: MessageEvent) => {
     const landmarks: Landmark[] = result.landmarks[0] ?? []
     let blink: number | null = null
     if (face) {
-      const result = face.detectForVideo(bitmap, timestamp)
-      const categories = result.faceBlendshapes[0]?.categories ?? []
-      const left = categories.find((c) => c.categoryName === 'eyeBlinkLeft')?.score
-      const right = categories.find((c) => c.categoryName === 'eyeBlinkRight')?.score
-      if (left !== undefined && right !== undefined) blink = (left + right) / 2
+      try {
+        const result = face.detectForVideo(bitmap, timestamp)
+        blink = readBlinkScore(result.faceLandmarks[0], result.faceBlendshapes[0]?.categories ?? [])
+      } catch (error) {
+        // Optional eye inference must not stop posture monitoring.
+        if (!faceFrameWarning) console.warn('Face inference unavailable; posture continues', error)
+        faceFrameWarning = true
+      }
     }
     scope.postMessage({ type: 'frame', timestamp: data.timestamp, landmarks, width: bitmap.width, height: bitmap.height, blink, inferenceMs: performance.now() - begin })
   } catch {

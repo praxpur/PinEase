@@ -1,10 +1,11 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ bad?: boolean; compact?: boolean }>(), { bad: false, compact: false })
+withDefaults(defineProps<{ bad?: boolean; compact?: boolean; view?: 'front' | 'side' }>(), { bad: false, compact: false, view: 'side' })
 </script>
 
 <template>
-  <svg viewBox="0 0 520 360" fill="none" class="posture-illustration" role="img" :aria-label="bad ? '低头坐姿示意' : '舒适坐姿示意'">
+  <svg viewBox="0 0 520 360" fill="none" class="posture-illustration" role="img" :aria-label="(view === 'front' ? '正面' : '侧面') + (bad ? '低头坐姿示意' : '舒适坐姿示意')">
     <rect x="32" y="30" width="456" height="296" rx="12" fill="var(--illustration-paper, #eeeae0)" />
+    <g v-if="view === 'side'">
     <path d="M65 274H456M342 140V225M338 225H444M393 225V286" stroke="var(--illustration-line, #b7b9ad)" stroke-width="3" stroke-linecap="round"/>
     <rect x="332" y="87" width="92" height="67" rx="6" fill="var(--illustration-screen, #e4e4da)" stroke="var(--illustration-line, #899688)" stroke-width="3"/>
     <path d="M378 154V174M360 174H396M320 178H414" stroke="var(--illustration-line, #899688)" stroke-width="3" stroke-linecap="round"/>
@@ -23,6 +24,26 @@ withDefaults(defineProps<{ bad?: boolean; compact?: boolean }>(), { bad: false, 
     <circle cx="109" cy="104" r="5" fill="#708568"/><circle cx="109" cy="229" r="5" fill="#708568"/>
     <path d="M65 293H456" stroke="var(--illustration-floor, #d5d6ca)" stroke-width="2"/>
     <path d="M444 274V219M431 246Q444 228 457 246M431 232Q444 214 457 232" stroke="#8b9a7d" stroke-width="3" stroke-linecap="round"/>
+    </g>
+    <g v-else>
+      <path d="M185 170V277M335 170V277M185 232H335" stroke="var(--illustration-line, #899688)" stroke-width="7" stroke-linecap="round" />
+      <path d="M228 230L220 286M292 230L300 286" stroke="#626857" stroke-width="25" stroke-linecap="round" />
+      <path d="M215 289H238M282 289H305" stroke="#394c3b" stroke-width="13" stroke-linecap="round" />
+      <g class="illustration-person" :transform="bad ? 'translate(0 12)' : ''">
+        <path d="M208 139Q260 116 312 139L304 224Q260 239 216 224Z" fill="#466747" />
+        <path d="M211 148L188 192L222 207M309 148L332 192L298 207" stroke="#859776" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="M260 106V133" stroke="#d8ba9b" stroke-width="15" stroke-linecap="round" />
+        <ellipse cx="260" :cy="bad ? 99 : 86" rx="29" :ry="bad ? 23 : 32" fill="#dbc0a2" />
+        <path :d="bad ? 'M232 93Q229 65 260 65Q293 66 289 96Q260 81 232 93Z' : 'M232 83Q227 52 259 52Q294 52 289 86L279 72Q254 66 232 83Z'" fill="#5c6250" />
+        <g v-if="!bad" stroke="#5c6250" stroke-width="2.5" stroke-linecap="round"><path d="M248 88H250M270 88H272M255 102Q260 105 265 102" /></g>
+      </g>
+      <path d="M155 153H365M155 153V294M365 153V294" stroke="var(--illustration-line, #899688)" stroke-width="4" stroke-linecap="round" />
+      <rect x="213" y="164" width="94" height="60" rx="5" fill="var(--illustration-screen, #e4e4da)" stroke="var(--illustration-line, #899688)" stroke-width="3" />
+      <path d="M260 224V240M240 240H280M170 253H350" stroke="var(--illustration-line, #899688)" stroke-width="3" stroke-linecap="round" />
+      <path d="M260 42V149" stroke="#bec9ae" stroke-dasharray="4 6" opacity=".6" />
+      <path d="M65 300H456" stroke="var(--illustration-floor, #d5d6ca)" stroke-width="2" />
+      <path d="M406 290V245M392 265Q406 244 420 265" stroke="#8b9a7d" stroke-width="3" stroke-linecap="round" />
+    </g>
   </svg>
 </template>
 
