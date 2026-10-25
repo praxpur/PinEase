@@ -20,7 +20,8 @@ const summary = computed(() => {
 })
 const visibleRecords = computed(() => {
   const first = stats.value[0]?.date ?? localDay()
-  return source.value.filter((s) => localDay(s.startedAt) >= first).slice(0, 30)
+  const last = stats.value[stats.value.length - 1]?.date ?? localDay()
+  return source.value.filter(s => s.segments.some(segment => localDay(segment.endedAt) >= first && localDay(segment.startedAt) <= last)).slice(0, 30)
 })
 const simulated = computed(() => example.value || store.demo)
 </script>

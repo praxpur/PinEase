@@ -91,7 +91,12 @@ export function validCalibration(v: unknown): v is Calibration {
     && finite(p.createdAt) && finite(p.sampleCount) && p.sampleCount >= 20
     && (p.side === 'left' || p.side === 'right') && !!b
     && finite(b.drop) && finite(b.shift) && finite(b.shoulders) && finite(b.scale)
+    && b.side === p.side && (p.view !== 'side' || finite(b.neck))
     && (b.neck === null || finite(b.neck)) && (b.torso === null || finite(b.torso))
+}
+
+function validDate(value: unknown): value is number {
+  return finite(value) && value >= 0 && value <= 8640000000000000
 }
 
 export function validSession(v: unknown): v is SessionRecord {
@@ -100,15 +105,30 @@ export function validSession(v: unknown): v is SessionRecord {
   const states = ['normal', 'candidate_bad', 'bad', 'unknown', 'absent', 'paused', 'need_cal']
   return typeof r.id === 'string' && r.id.length < 150 && r.mode === 'real'
     && finite(r.startedAt) && r.startedAt > 0 && (r.endedAt === null || finite(r.endedAt))
+    && validDate(r.startedAt) && (r.endedAt === null || validDate(r.endedAt) && r.endedAt >= r.startedAt)
     && (r.view === 'front' || r.view === 'side')
     && [r.goodSeconds, r.badSeconds, r.unknownSeconds, r.absentSeconds, r.pausedSeconds].every((n) => finite(n) && n >= 0)
     && Array.isArray(r.segments) && r.segments.length <= 100000
-    && r.segments.every((s) => s && finite(s.startedAt) && finite(s.endedAt) && s.endedAt >= s.startedAt && finite(s.seconds) && s.seconds >= 0 && states.includes(s.state) && typeof s.reason === 'string')
+    && r.segments.every((s) => s && finite(s.startedAt) && finite(s.endedAt) && s.endedAt >= s.startedAt && validDate(s.startedAt) && validDate(s.endedAt) && finite(s.seconds) && s.seconds >= 0 && s.seconds <= (s.endedAt - s.startedAt) / 1000 + 2 && states.includes(s.state) && typeof s.reason === 'string')
     && Array.isArray(r.reminders) && r.reminders.length <= 10000
-    && r.reminders.every((e) => e && finite(e.at) && ['posture', 'break', 'eyes'].includes(e.kind) && typeof e.message === 'string')
+    && r.reminders.every((e) => e && validDate(e.at) && ['posture', 'break', 'eyes'].includes(e.kind) && typeof e.message === 'string')
+    && matchingTotals(r)
+}
+
+function matchingTotals(record: SessionRecord): boolean {
+  const sums = { goodSeconds: 0, badSeconds: 0, unknownSeconds: 0, absentSeconds: 0, pausedSeconds: 0 }
+  for (const segment of record.segments) {
+    if (segment.state === 'normal') sums.goodSeconds += segment.seconds
+    if (segment.state === 'bad' || segment.state === 'candidate_bad') sums.badSeconds += segment.seconds
+    if (segment.state === 'unknown' || segment.state === 'need_cal') sums.unknownSeconds += segment.seconds
+    if (segment.state === 'absent') sums.absentSeconds += segment.seconds
+    if (segment.state === 'paused') sums.pausedSeconds += segment.seconds
+  }
+  return (Object.keys(sums) as (keyof typeof sums)[]).every(key => Math.abs(record[key] - sums[key]) < 1)
 }
 
 export async function importHistory(text: string): Promise<number> {
+  if (text.length > 10 * 1024 * 1024) throw new Error('备份超过 10 MB。')
   const parsed: unknown = JSON.parse(text)
   if (!parsed || typeof parsed !== 'object') throw new Error('这不是 PinEase 的备份文件。')
   const source = parsed as { application?: string; schema?: number; sessions?: unknown[] }

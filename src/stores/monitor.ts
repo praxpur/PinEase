@@ -114,11 +114,11 @@ export const useMonitorStore = defineStore('monitor', () => {
     await refreshDevices()
     desktopRuntime.value = window.pineaseDesktop?.isDesktop === true
     document.addEventListener('visibilitychange', () => {
-      if (!desktopRuntime.value && document.hidden && running.value) pause('页面移到后台，已暂停监测')
+      if (!desktopRuntime.value && document.hidden && (running.value || busy.value)) pause('页面移到后台，已暂停监测')
     })
     window.addEventListener('pagehide', () => {
-      camera?.close()
-      void persist()
+      if (running.value || busy.value) pause('页面已离开，监测已暂停')
+      else void persist()
     })
   }
 
@@ -135,9 +135,9 @@ export const useMonitorStore = defineStore('monitor', () => {
     return saving
   }
 
-  async function persist() {
-    if (!session.value || demo.value) return
-    const snapshot = JSON.parse(JSON.stringify(session.value)) as SessionRecord
+  async function persist(record: SessionRecord | null = session.value) {
+    if (!record || record.mode === 'demo') return
+    const snapshot = JSON.parse(JSON.stringify(record)) as SessionRecord
     await queueSave(() => storage.saveSession(snapshot))
     const index = sessions.value.findIndex((s) => s.id === snapshot.id)
     if (index >= 0) sessions.value[index] = snapshot
@@ -268,8 +268,9 @@ export const useMonitorStore = defineStore('monitor', () => {
       if (settings.value.soundEnabled) prepareAudio()
     } catch (failure) {
       active.close()
-      stream.value = null
       if (generation !== token) return
+      stream.value = null
+      if (camera === active) camera = null
       error.value = cameraError(failure)
       phase.value = resuming && session.value ? 'paused' : 'idle'
       state.value = resuming ? 'paused' : 'need_cal'
@@ -438,6 +439,7 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   function pause(message = '监测已暂停，摄像头已关闭') {
+    if (busy.value) { void endSession(); reason.value = message; return }
     if (!running.value) return
     tick()
     phase.value = 'paused'
@@ -475,15 +477,16 @@ export const useMonitorStore = defineStore('monitor', () => {
     if (timer !== null) clearInterval(timer)
     if (saveTimer !== null) clearInterval(saveTimer)
     timer = saveTimer = null
-    if (session.value) {
-      session.value.endedAt = Date.now()
-      if (demo.value) {
-        demoSessions.value = [JSON.parse(JSON.stringify(session.value)) as SessionRecord, ...demoSessions.value.filter((r) => r.id !== session.value?.id)]
-      } else await persist()
-    }
+    const ended = session.value
     session.value = null
     resetDynamics()
     reason.value = '本次监测已结束'
+    if (ended) {
+      ended.endedAt = Date.now()
+      if (ended.mode === 'demo') {
+        demoSessions.value = [JSON.parse(JSON.stringify(ended)) as SessionRecord, ...demoSessions.value.filter(r => r.id !== ended.id)]
+      } else await persist(ended)
+    }
   }
 
   function prepareAudio() {
@@ -534,9 +537,10 @@ export const useMonitorStore = defineStore('monitor', () => {
     const next = storage.sanitizeSettings({ ...settings.value, ...partial })
     const needsRestart = next.view !== settings.value.view || next.cameraId !== settings.value.cameraId || next.cameraFacingMode !== settings.value.cameraFacingMode || next.blinkEnabled !== settings.value.blinkEnabled || next.fps !== settings.value.fps
     if (needsRestart && (running.value || phase.value === 'paused' || busy.value)) await endSession()
+    const breakChanged = next.sitMinutes !== settings.value.sitMinutes || next.breakEnabled !== settings.value.breakEnabled
     settings.value = next
     if (next.soundEnabled) prepareAudio()
-    nextBreak = continuousSeconds.value + next.sitMinutes * 60
+    if (breakChanged) nextBreak = next.sitMinutes * 60
     await queueSave(() => storage.saveSettings({ ...next }))
     if (needsRestart) announce('设置已保存', '下次开始监测时使用新的设置。')
   }

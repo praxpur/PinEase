@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, Tray, nativeImage, net, powerMonitor, protocol, session, ipcMain } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
+const { isTrustedUrl, canRequest, canCheck } = require('./permissions.cjs')
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -51,6 +52,7 @@ async function registerAppProtocol() {
   const distRoot = path.resolve(app.getAppPath(), 'dist')
   protocol.handle('app', async (request) => {
     try {
+      if (!isTrustedUrl(request.url)) return new Response('Forbidden', { status: 403 })
       const pathname = decodeURIComponent(new URL(request.url).pathname)
       const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
       const resource = path.resolve(distRoot, relative)
@@ -83,7 +85,7 @@ function createWindow() {
   })
   windowRef.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   windowRef.webContents.on('will-navigate', (event, target) => {
-    if (!target.startsWith(APP_URL) && !target.startsWith('http://localhost:5180/')) event.preventDefault()
+    if (!isTrustedUrl(target, developmentUrl)) event.preventDefault()
   })
   windowRef.on('ready-to-show', showWindow)
   windowRef.on('close', (event) => {
@@ -123,9 +125,14 @@ app.whenReady().then(async () => {
   if (process.platform === 'win32') app.setAppUserModelId('cn.pinease.desktop')
   await registerAppProtocol()
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    const trustedApp = webContents.getURL().startsWith(APP_URL)
-    const cameraOnly = permission === 'media' && Array.isArray(details.mediaTypes) && details.mediaTypes.includes('video') && !details.mediaTypes.includes('audio')
-    callback(trustedApp && cameraOnly)
+    const trusted = !!webContents && webContents === windowRef?.webContents && isTrustedUrl(webContents.getURL(), developmentUrl)
+      && isTrustedUrl(details.requestingUrl || webContents.getURL(), developmentUrl)
+    callback(trusted && canRequest(permission, details))
+  })
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+    if (webContents && webContents !== windowRef?.webContents) return false
+    const source = details.requestingUrl || requestingOrigin
+    return isTrustedUrl(source, developmentUrl) && canCheck(permission, details)
   })
   ipcMain.on('desktop:state', (event, state) => {
     if (event.sender !== windowRef?.webContents) return

@@ -45,12 +45,18 @@ export function dailyStats(records: SessionRecord[], days: number): DailyStats[]
     let reminders = 0
     let sessions = 0
     for (const record of records) {
-      const segments = record.segments.filter((s) => localDay(s.startedAt) === date)
+      const dayStart = new Date(date + 'T00:00:00').getTime()
+      const next = new Date(dayStart); next.setDate(next.getDate() + 1)
+      const dayEnd = next.getTime()
+      const segments = record.segments.filter(s => s.endedAt > dayStart && s.startedAt < dayEnd)
       if (segments.length) sessions++
       for (const s of segments) {
-        if (s.state === 'normal') goodSeconds += s.seconds
-        if (s.state === 'bad' || s.state === 'candidate_bad') badSeconds += s.seconds
-        if (s.state === 'unknown' || s.state === 'need_cal') unknownSeconds += s.seconds
+        const span = s.endedAt - s.startedAt
+        const overlap = Math.max(0, Math.min(s.endedAt, dayEnd) - Math.max(s.startedAt, dayStart))
+        const seconds = span > 0 ? s.seconds * overlap / span : 0
+        if (s.state === 'normal') goodSeconds += seconds
+        if (s.state === 'bad' || s.state === 'candidate_bad') badSeconds += seconds
+        if (s.state === 'unknown' || s.state === 'need_cal') unknownSeconds += seconds
       }
       reminders += record.reminders.filter((e) => localDay(e.at) === date).length
     }

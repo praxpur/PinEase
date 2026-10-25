@@ -4,6 +4,7 @@ export class VisionCamera {
   stream: MediaStream | null = null
   video: HTMLVideoElement | null = null
   private worker: Worker | null = null
+  private fallbackVideo: HTMLVideoElement | null = null
   private timer: number | null = null
   private busy = false
   private closed = false
@@ -60,13 +61,34 @@ export class VisionCamera {
   }
 
   private async capture() {
-    if (this.closed || this.busy || !this.video || !this.worker || this.video.readyState < 2 || this.video.currentTime === this.lastVideoTime) return
+    if (this.closed || this.busy || !this.worker || !this.stream) return
     this.busy = true
-    this.lastVideoTime = this.video.currentTime
     try {
-      const bitmap = await createImageBitmap(this.video)
+      const preview = this.getPreviewVideo()
+      let source = preview?.srcObject === this.stream ? preview : null
+      if (!source) {
+        // Route changes unmount the visible preview. Keep capture alive independently.
+        if (!this.fallbackVideo) {
+          const fallback = document.createElement('video')
+          fallback.muted = true
+          fallback.playsInline = true
+          fallback.className = 'capture-source'
+          fallback.setAttribute('aria-hidden', 'true')
+          fallback.srcObject = this.stream
+          document.body.append(fallback)
+          this.fallbackVideo = fallback
+        }
+        source = this.fallbackVideo
+        if (source.paused) await source.play()
+      }
+      if (this.closed || !this.worker) { this.busy = false; return }
+      if (this.video !== source) { this.video = source; this.lastVideoTime = -1 }
+      if (source.readyState < 2 || source.currentTime === this.lastVideoTime) { this.busy = false; return }
+      this.lastVideoTime = source.currentTime
+      const timestamp = performance.now()
+      const bitmap = await createImageBitmap(source)
       if (this.closed || !this.worker) { bitmap.close(); this.busy = false; return }
-      this.worker.postMessage({ type: 'frame', bitmap, timestamp: performance.now() }, [bitmap])
+      this.worker.postMessage({ type: 'frame', bitmap, timestamp }, [bitmap])
     } catch { this.busy = false }
   }
 
@@ -78,9 +100,15 @@ export class VisionCamera {
     this.rejectReady = null
     this.worker?.terminate()
     this.worker = null
-    this.stream?.getTracks().forEach((track) => { track.onended = null; track.stop() })
+    const ownedStream = this.stream
+    ownedStream?.getTracks().forEach((track) => { track.onended = null; track.stop() })
+    for (const video of new Set([this.video, this.fallbackVideo])) {
+      // A cancelled startup must not detach a newer session sharing the preview element.
+      if (video && ownedStream && video.srcObject === ownedStream) { video.pause(); video.srcObject = null }
+    }
+    this.fallbackVideo?.remove()
+    this.fallbackVideo = null
     this.stream = null
-    if (this.video) { this.video.pause(); this.video.srcObject = null }
     this.video = null
     this.busy = false
   }

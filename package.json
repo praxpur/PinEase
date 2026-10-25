@@ -5,6 +5,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "test": "node --test tests/*.test.mjs",
     "dev": "vite --port 5180",
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "build:icon": "node scripts/build-icon.mjs",
