@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Camera, CameraOff, Eye, EyeOff, ShieldCheck, Pause, Play, Square } from 'lucide-vue-next'
+import { Camera, CameraOff, Eye, EyeOff, ShieldCheck, Pause, Play, Square, X } from 'lucide-vue-next'
 import { useMonitorStore } from '@/stores/monitor'
 import PostureIllustration from './PostureIllustration.vue'
 const store = useMonitorStore()
@@ -84,6 +84,13 @@ onBeforeUnmount(() => { resize?.disconnect(); if (video.value) video.value.srcOb
         <span v-if="store.demo && store.demoPose === 'absent'" class="demo-absent">演示：已离开座位</span>
       </div>
       <div v-if="store.phase === 'loading'" class="camera-loading"><span class="loader" /><span>准备摄像头与本地识别…</span></div>
+      <Transition name="fun">
+        <div v-if="store.funMoment" class="fun-moment" role="status" aria-live="polite" aria-atomic="true">
+          <span class="fun-emoji" aria-hidden="true">{{ store.funMoment.emoji }}</span>
+          <div><span class="fun-kicker">{{ store.funMoment.preview ? '彩蛋预览 · 模拟触发' : '发现一个小彩蛋' }}</span><strong>{{ store.funMoment.title }}</strong><p>{{ store.funMoment.message }}</p></div>
+          <button class="icon-button" aria-label="关闭趣味彩蛋" @click="store.dismissFun"><X :size="15" /></button>
+        </div>
+      </Transition>
       <div v-if="store.phase === 'calibrating'" class="calibration-overlay">
         <span class="calibration-count">{{ Math.max(0, Math.ceil((100 - store.calibrationProgress) / 12.5)) }}</span>
         <p>舒适地坐好，保持几秒</p>

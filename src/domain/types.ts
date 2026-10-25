@@ -31,6 +31,7 @@ export interface Settings {
   notificationsEnabled: boolean
   focusReminder: boolean
   blinkEnabled: boolean
+  funEnabled: boolean
   fps: number
 }
 
@@ -136,6 +137,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notificationsEnabled: false,
   focusReminder: false,
   blinkEnabled: false,
+  funEnabled: true,
   fps: 12,
 }
 
