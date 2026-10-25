@@ -176,7 +176,7 @@ npm.cmd run desktop:run
 npm.cmd run build:desktop
 ```
 
-第一条命令构建网页并以 Electron 启动；第二条生成 Windows x64 NSIS 安装包，输出在 `release/`。桌面版将识别模型和 WASM 随应用打包，首次启动时仍需允许摄像头。关闭窗口会将应用留在托盘，电脑锁定或睡眠时暂停监测；退出应用会先保存当前记录。
+第一条命令构建网页并以 Electron 启动；第二条生成 Windows x64 NSIS 安装包，输出在 `release/`。桌面图标由 `public/icon.svg` 生成多尺寸 `public/favicon.ico`，运行 `npm.cmd run build:icon` 可单独更新；构建时也会自动更新。标题栏与当前日间/夜间主题同步，顶部空白可拖动窗口，右上角保留 Windows 窗口按钮。桌面版将识别模型和 WASM 随应用打包，首次启动时仍需允许摄像头。关闭窗口会将应用留在托盘，电脑锁定或睡眠时暂停监测；退出应用会先保存当前记录。
 
 ## 继续开发与软著材料
 

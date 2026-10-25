@@ -8,6 +8,10 @@ protocol.registerSchemesAsPrivileged([
 
 const APP_URL = 'app://pinease/'
 const developmentUrl = process.env.PINEASE_DEV_URL
+const titleBarColors = {
+  light: { color: '#f8f7f2', symbolColor: '#3b5337', height: 38 },
+  dark: { color: '#273229', symbolColor: '#e0e8dc', height: 38 },
+}
 let windowRef = null
 let trayRef = null
 let appState = 'idle'
@@ -66,6 +70,8 @@ function createWindow() {
     minHeight: 680,
     show: false,
     autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: titleBarColors.light,
     icon: path.join(app.getAppPath(), 'dist', 'favicon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -114,19 +120,26 @@ app.on('before-quit', (event) => {
 })
 
 app.whenReady().then(async () => {
+  if (process.platform === 'win32') app.setAppUserModelId('cn.pinease.desktop')
   await registerAppProtocol()
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const trustedApp = webContents.getURL().startsWith(APP_URL)
     const cameraOnly = permission === 'media' && Array.isArray(details.mediaTypes) && details.mediaTypes.includes('video') && !details.mediaTypes.includes('audio')
     callback(trustedApp && cameraOnly)
   })
-  ipcMain.on('desktop:state', (_event, state) => {
+  ipcMain.on('desktop:state', (event, state) => {
+    if (event.sender !== windowRef?.webContents) return
     if (state === 'idle' || state === 'running' || state === 'paused') {
       appState = state
       updateTrayMenu()
     }
   })
-  ipcMain.on('desktop:quit-ready', () => {
+  ipcMain.on('desktop:theme', (event, theme) => {
+    if (event.sender !== windowRef?.webContents || !Object.hasOwn(titleBarColors, theme)) return
+    windowRef.setTitleBarOverlay(titleBarColors[theme])
+  })
+  ipcMain.on('desktop:quit-ready', (event) => {
+    if (event.sender !== windowRef?.webContents || !quitPending) return
     allowQuit = true
     app.quit()
   })

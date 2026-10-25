@@ -16,6 +16,7 @@ function apply() {
   dark.value = preference.value === 'dark' || (preference.value === 'system' && media.matches)
   document.documentElement.dataset.theme = dark.value ? 'dark' : 'light'
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark.value ? '#171e19' : '#f8f7f2')
+  window.pineaseDesktop?.setTheme(dark.value ? 'dark' : 'light')
 }
 export function setTheme(value: ThemePreference) {
   preference.value = value

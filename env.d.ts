@@ -7,6 +7,7 @@ declare global {
       readonly isDesktop: true
       onCommand: (callback: (command: 'pause' | 'resume' | 'quit') => void) => () => void
       setState: (state: 'idle' | 'running' | 'paused') => void
+      setTheme: (theme: 'light' | 'dark') => void
       readyToQuit: () => void
     }
   }

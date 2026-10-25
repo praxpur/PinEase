@@ -22,6 +22,8 @@ button, a { transition: background-color .18s, color .18s, border-color .18s, op
 button svg, a svg { flex: 0 0 auto; }
 .app-shell { max-width: 1248px; margin: auto; padding: 0 48px; }
 .site-header { height: 91px; display: flex; align-items: center; justify-content: space-between; gap: 28px; border-bottom: 1px solid var(--night-border, #dedfd4); }
+.desktop-runtime .site-header { height: 112px; padding-top: 38px; -webkit-app-region: drag; app-region: drag; }
+.desktop-runtime .site-header a, .desktop-runtime .site-header button, .desktop-runtime .site-header nav, .desktop-runtime .site-header .header-status { -webkit-app-region: no-drag; app-region: no-drag; }
 .brand { display: flex; align-items: center; gap: 9px; color: var(--night-text, #3b5337); }
 .brand > span { font-family: Georgia, serif; font-size: 23px; letter-spacing: -.9px; line-height: 1.1; }
 .brand small { display: block; font-family: var(--font-sans); font-size: 9px; letter-spacing: 3px; margin-top: 6px; color: var(--night-muted, #7f8b74); }

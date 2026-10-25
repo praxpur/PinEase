@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('pineaseDesktop', Object.freeze({
   setState(state) {
     if (state === 'idle' || state === 'running' || state === 'paused') ipcRenderer.send('desktop:state', state)
   },
+  setTheme(theme) {
+    if (theme === 'light' || theme === 'dark') ipcRenderer.send('desktop:theme', theme)
+  },
   readyToQuit() {
     ipcRenderer.send('desktop:quit-ready')
   },
