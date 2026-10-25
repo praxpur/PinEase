@@ -87,8 +87,8 @@ onBeforeUnmount(() => { resize?.disconnect(); if (video.value) video.value.srcOb
       <Transition name="fun">
         <div v-if="store.funMoment" class="fun-moment" role="status" aria-live="polite" aria-atomic="true">
           <span class="fun-emoji" aria-hidden="true">{{ store.funMoment.emoji }}</span>
-          <div><span class="fun-kicker">{{ store.funMoment.preview ? '彩蛋预览 · 模拟触发' : '发现一个小彩蛋' }}</span><strong>{{ store.funMoment.title }}</strong><p>{{ store.funMoment.message }}</p></div>
-          <button class="icon-button" aria-label="关闭趣味彩蛋" @click="store.dismissFun"><X :size="15" /></button>
+          <div><strong>{{ store.funMoment.title }}</strong></div>
+          <button class="icon-button" aria-label="关闭" @click="store.dismissFun"><X :size="15" /></button>
         </div>
       </Transition>
       <div v-if="store.phase === 'calibrating'" class="calibration-overlay">
@@ -100,4 +100,3 @@ onBeforeUnmount(() => { resize?.disconnect(); if (video.value) video.value.srcOb
     <div class="camera-footer"><span><ShieldCheck :size="14" />画面只在当前设备处理</span><span v-if="store.running || store.phase === 'paused'" class="camera-inline-controls"><button v-if="store.phase !== 'calibrating'" @click="store.phase === 'paused' ? store.resume() : store.pause()"><Play v-if="store.phase === 'paused'" :size="12" /><Pause v-else :size="12" />{{ store.phase === 'paused' ? '继续' : '暂停' }}</button><button @click="store.endSession"><Square :size="10" />结束</button></span><label class="camera-mode-select"><Camera :size="14" /><span class="sr-only">监测模式</span><select aria-label="监测模式" title="切换模式会结束当前监测，请按新机位重新开始" :value="store.demo && store.phase !== 'idle' ? 'front' : store.settings.view" :disabled="store.busy || store.phase === 'calibrating'" @change="changeView"><option value="front">正面模式</option><option value="side">侧面模式</option></select></label></div>
   </div>
 </template>
-

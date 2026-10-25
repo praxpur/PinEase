@@ -122,7 +122,5 @@ test('legacy sound preferences receive defaults and imported values are bounded'
   const invalid=sanitizeSettings({soundVolume:500,soundRepeats:-5})
   assert.equal(invalid.soundVolume,100);assert.equal(invalid.soundRepeats,1)
   assert.equal(sanitizeSettings({soundVolume:NaN}).soundVolume,70)
-  assert.equal(old.funEnabled,true)
-  assert.equal(sanitizeSettings({funEnabled:false}).funEnabled,false)
-  assert.equal(sanitizeSettings({funEnabled:'false'}).funEnabled,true)
+  assert.equal(Object.hasOwn(sanitizeSettings({funEnabled:false}), 'funEnabled'),false)
 })

@@ -4,12 +4,7 @@ import { ArrowUpRight, ArrowRight, Play, Pause, Square, ScanLine, Check, ShieldC
 import { useMonitorStore } from '@/stores/monitor'
 import { clock, duration } from '@/lib/format'
 import CameraPreview from '@/components/CameraPreview.vue'
-import { FUN_MESSAGES, type FunKind } from '@/domain/fun'
 const store = useMonitorStore()
-function previewFun(kind: FunKind) {
-  store.previewFun(kind)
-  document.querySelector('.camera-panel')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' })
-}
 watch(() => store.phase, (phase, previous) => {
   if (phase === 'ready' || phase === 'monitoring' && (previous === 'idle' || previous === 'loading')) {
     requestAnimationFrame(() => document.querySelector('.monitor-layout')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' }))
@@ -78,11 +73,6 @@ const statusDescription = computed(() => {
       <div class="segmented"><button :aria-pressed="store.demoPose === 'normal'" :class="{ selected: store.demoPose === 'normal' }" @click="store.demoPose = 'normal'">舒适坐姿</button><button :aria-pressed="store.demoPose === 'bad'" :class="{ selected: store.demoPose === 'bad' }" @click="store.demoPose = 'bad'">持续低头</button><button :aria-pressed="store.demoPose === 'absent'" :class="{ selected: store.demoPose === 'absent' }" @click="store.demoPose = 'absent'">离开座位</button></div>
     </div>
 
-    <div v-if="store.demo && store.phase === 'monitoring' && store.settings.funEnabled" class="fun-demo-controls">
-      <div><strong>预览趣味彩蛋</strong><p>点击查看提示效果；真人识别需动作保持 2 秒，靠近屏幕需先完成正面校准。</p></div>
-      <div class="fun-demo-buttons"><button v-for="(moment, kind) in FUN_MESSAGES" :key="kind" class="small-button" @click="previewFun(kind)">{{ moment.emoji }} {{ { alien: '倒立', owl: '歪头', closer: '靠近屏幕', stretch: '举起双手' }[kind] }}</button></div>
-    </div>
-
     <section class="today-section">
       <div class="section-title-row"><h2>今天，一点点积累</h2><RouterLink to="/history" class="text-link">查看历史<ArrowUpRight :size="15" /></RouterLink></div>
       <div class="today-metrics">
@@ -105,4 +95,3 @@ const statusDescription = computed(() => {
     <div class="closing-note"><Timer :size="16" /><span>暂时看不清、离座和暂停，都不会算成有效专注。</span><Eye :size="16" class="closing-eye" /></div>
   </div>
 </template>
-

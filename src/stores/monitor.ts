@@ -6,7 +6,7 @@ import * as storage from '@/lib/storage'
 import { dailyStats, downloadFile, localDay } from '@/lib/format'
 import { DEMO_FEATURES, demoCalibration } from '@/lib/demo'
 import { BlinkTracker } from '@/domain/blink'
-import { detectFun, FUN_MESSAGES, FunTracker, type FunKind } from '@/domain/fun'
+import { detectInversion, ALIEN_MESSAGE, InversionTracker } from '@/domain/fun'
 import { playReminder } from '@/lib/audio'
 import { cameraError, VisionCamera } from '@/lib/vision'
 
@@ -46,8 +46,8 @@ export const useMonitorStore = defineStore('monitor', () => {
   const blinkObservedSeconds = ref(0)
   const blinkStatus = ref('开启眨眼参考后开始采集')
   const blinkTracker = new BlinkTracker()
-  const funTracker = new FunTracker()
-  const funMoment = ref<(typeof FUN_MESSAGES)[FunKind] & { preview: boolean } | null>(null)
+  const funTracker = new InversionTracker()
+  const funMoment = ref<typeof ALIEN_MESSAGE | null>(null)
   let funTimer: number | null = null
   const toast = ref<{ title: string; message: string; kind: 'info' | 'reminder' | 'error' } | null>(null)
   const restOpen = ref(false)
@@ -362,9 +362,8 @@ export const useMonitorStore = defineStore('monitor', () => {
     frameHeight.value = frame.height
     inferenceMs.value = frame.inferenceMs
     handleObservation(frame.landmarks, lastFrame, frame.width, frame.height)
-    if (settings.value.funEnabled && (phase.value === 'ready' || phase.value === 'monitoring')) {
-      const kind = funTracker.update(detectFun(frame.landmarks, frame.width, frame.height, settings.value.view, profileMismatch ? null : profile.value), lastFrame)
-      if (kind) showFun(kind)
+    if (phase.value === 'ready' || phase.value === 'monitoring') {
+      if (funTracker.update(detectInversion(frame.landmarks, frame.width, frame.height), lastFrame)) showFun()
     }
     if (settings.value.blinkEnabled && blinkAvailable.value && phase.value === 'monitoring') handleBlink(frame.blink, frame.timestamp)
   }
@@ -525,7 +524,6 @@ export const useMonitorStore = defineStore('monitor', () => {
     const needsRestart = next.view !== settings.value.view || next.cameraId !== settings.value.cameraId || next.blinkEnabled !== settings.value.blinkEnabled || next.fps !== settings.value.fps
     if (needsRestart && (running.value || phase.value === 'paused' || busy.value)) await endSession()
     settings.value = next
-    if (!next.funEnabled) resetFun()
     if (next.soundEnabled) prepareAudio()
     nextBreak = continuousSeconds.value + next.sitMinutes * 60
     await queueSave(() => storage.saveSettings({ ...next }))
@@ -590,14 +588,10 @@ export const useMonitorStore = defineStore('monitor', () => {
     funTracker.reset()
   }
 
-  function showFun(kind: FunKind, preview = false) {
+  function showFun() {
     dismissFun()
-    funMoment.value = { ...FUN_MESSAGES[kind], preview }
+    funMoment.value = { ...ALIEN_MESSAGE }
     funTimer = window.setTimeout(dismissFun, 5000)
-  }
-
-  function previewFun(kind: FunKind) {
-    if (demo.value && phase.value === 'monitoring' && settings.value.funEnabled) showFun(kind, true)
   }
 
   return {
@@ -607,7 +601,6 @@ export const useMonitorStore = defineStore('monitor', () => {
     continuousSeconds, blinkRate, blinkAvailable, blinkCount, blinkObservedSeconds, blinkStatus, toast, restOpen, restRemaining, restKind, stateLabel, stateColor,
     init, startCamera, startDemo, beginCalibration, pause, resume, endSession, updateSettings, refreshDevices,
     requestNotifications, resetProfiles, exportBackup, exportCSV, importBackup, deleteHistory, dismissToast,
-    closeRest, announce, previewSound, funMoment, dismissFun, previewFun,
+    closeRest, announce, previewSound, funMoment, dismissFun,
   }
 })
-

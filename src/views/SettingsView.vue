@@ -59,7 +59,6 @@ async function confirmAction() {
 
         <section class="settings-panel">
           <h2><Bell :size="18" />轻轻提醒</h2>
-          <div class="setting-row"><div><strong>趣味模式</strong><p>倒立、歪头、靠近屏幕或举起双手，解锁小彩蛋</p><p>动作保持 2 秒；同类彩蛋间隔 45 秒，不发出声音</p></div><AppSwitch :model-value="store.settings.funEnabled" label="趣味模式" @update:model-value="store.updateSettings({ funEnabled: $event })" /></div>
           <div class="setting-row slider-row"><div><label for="sensitivity">提醒灵敏度</label><p>从宽松开始，按体验慢慢调整</p></div><div class="range-control"><input id="sensitivity" type="range" min="0.6" max="1.6" step="0.1" :value="store.settings.sensitivity" @change="number('sensitivity', $event)" /><span>{{ store.settings.sensitivity < 0.9 ? '宽松' : store.settings.sensitivity > 1.2 ? '敏感' : '适中' }}</span></div></div>
           <div class="setting-row"><div><label for="hold">持续多久再提醒</label><p>给捡笔、喝水和短暂动作留一点余地</p></div><div class="number-control"><input id="hold" type="number" min="2" max="20" :value="store.settings.holdSeconds" @change="number('holdSeconds', $event)" /><span>秒</span></div></div>
           <div class="setting-row"><div><label for="cooldown">两次提醒的间隔</label><p>持续偏离时也不会频繁打断</p></div><div class="number-control"><input id="cooldown" type="number" min="15" max="300" step="15" :value="store.settings.cooldownSeconds" @change="number('cooldownSeconds', $event)" /><span>秒</span></div></div>
@@ -104,4 +103,3 @@ const LeafIllustration = defineComponent({
 })
 export default { components: { LeafIllustration } }
 </script>
-

@@ -31,7 +31,6 @@ export interface Settings {
   notificationsEnabled: boolean
   focusReminder: boolean
   blinkEnabled: boolean
-  funEnabled: boolean
   fps: number
 }
 
@@ -137,7 +136,6 @@ export const DEFAULT_SETTINGS: Settings = {
   notificationsEnabled: false,
   focusReminder: false,
   blinkEnabled: false,
-  funEnabled: true,
   fps: 12,
 }
 
@@ -150,4 +148,3 @@ export const STATE_LABELS: Record<PostureState, string> = {
   absent: '未检测到人',
   paused: '监测已暂停',
 }
-
