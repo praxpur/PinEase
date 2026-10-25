@@ -112,6 +112,18 @@ onBeforeUnmount(() => {
         <div class="calibration-track"><i :style="{ width: store.calibrationProgress + '%' }" /></div>
       </div>
     </div>
-    <div class="camera-footer"><span><ShieldCheck :size="14" />画面只在当前设备处理</span><span v-if="store.running || store.phase === 'paused'" class="camera-inline-controls"><button v-if="store.phase !== 'calibrating'" @click="store.phase === 'paused' ? store.resume() : store.pause()"><Play v-if="store.phase === 'paused'" :size="12" /><Pause v-else :size="12" />{{ store.phase === 'paused' ? '继续' : '暂停' }}</button><button @click="store.endSession"><Square :size="10" />结束</button></span><label class="camera-mode-select"><Camera :size="14" /><span class="sr-only">监测模式</span><select aria-label="监测模式" title="切换模式会结束当前监测，请按新机位重新开始" :value="store.demo && store.phase !== 'idle' ? 'front' : store.settings.view" :disabled="store.busy || store.phase === 'calibrating'" @change="changeView"><option value="front">正面模式</option><option value="side">侧面模式</option></select></label></div>
+    <div v-if="store.running || store.phase === 'paused' || store.busy" class="monitor-control-bar" role="group" aria-label="监测控制">
+      <span class="monitor-control-status"><span class="status-dot" :class="{ on: store.running }" />{{ store.phase === 'paused' ? '监测已暂停' : store.busy ? '正在准备摄像头' : store.phase === 'calibrating' ? '正在校准' : store.phase === 'ready' ? '等待校准' : '正在监测' }}</span>
+      <div class="monitor-control-buttons">
+        <button v-if="!store.busy" type="button" class="button button-primary monitor-control-button" @click="store.phase === 'paused' ? store.resume() : store.pause()">
+          <Play v-if="store.phase === 'paused'" :size="18" /><Pause v-else :size="18" />{{ store.phase === 'paused' ? '继续监测' : '暂停监测' }}
+        </button>
+        <button type="button" class="button monitor-control-button monitor-control-stop" @click="store.endSession"><Square :size="16" />{{ store.busy ? '取消启动' : '结束监测' }}</button>
+      </div>
+    </div>
+    <div class="camera-footer">
+      <span><ShieldCheck :size="14" />画面只在当前设备处理</span>
+      <label class="camera-mode-select"><Camera :size="14" /><span class="sr-only">监测模式</span><select aria-label="监测模式" title="切换模式会结束当前监测，请按新机位重新开始" :value="store.demo && store.phase !== 'idle' ? 'front' : store.settings.view" :disabled="store.busy || store.phase === 'calibrating'" @change="changeView"><option value="front">正面模式</option><option value="side">侧面模式</option></select></label>
+    </div>
   </div>
 </template>

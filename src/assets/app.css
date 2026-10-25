@@ -106,8 +106,6 @@ button svg, a svg { flex: 0 0 auto; }
 .recalibrate-button { width: 100%; display: flex; align-items: center; gap: 7px; background: transparent; border: 0; border-top: 1px solid var(--night-border, #eceee6); padding: 12px 0 0; margin-top: 15px; color: var(--night-muted, #8d987d); font-size: 10px; }
 .recalibrate-button > svg:last-child { margin-left: auto; }
 .calibration-button { margin-top: 15px; width: 100%; }
-.camera-inline-controls { display: flex; gap: 16px; }
-.camera-inline-controls > button { background: transparent; border: 0; display: flex; align-items: center; gap: 5px; color: var(--night-text, #68795a); font-size: 11px; padding: 2px 0; }
 .today-section { margin-top: 36px; }
 .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
 .section-title-row h2 { font-size: 14px; font-weight: 500; }
@@ -401,7 +399,6 @@ button svg, a svg { flex: 0 0 auto; }
   .camera-stage .camera-preview-hidden { opacity: 0; }
   .camera-footer { padding: 10px max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); gap: 7px 12px; font-size: 11px; }
   .camera-footer button, .camera-privacy-button { min-height: 44px; padding: 8px; }
-  .camera-inline-controls { gap: 6px; }
   .camera-mode-select select { min-height: 44px; }
   .page-heading { flex-wrap: wrap; align-items: flex-start; }
   .page-heading .button { min-height: 44px; font-size: 12px; }
@@ -467,5 +464,24 @@ button svg, a svg { flex: 0 0 auto; }
 .camera-footer { flex-wrap: wrap; }
 .camera-mode-select { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
 .camera-mode-select select { color: inherit; background: var(--night-soft, #f8f8ef); border: 1px solid var(--night-border, #c7cfb8); border-radius: 4px; padding: 5px 6px; font-size: 11px; cursor: pointer; }
-.camera-inline-controls { margin-left: auto; }
 .blink-diagnostics { padding: 12px 0; font-size: 11px; line-height: 1.9; color: var(--night-muted, #77816b); }
+
+/* Session actions have their own high-contrast row directly below the camera. */
+.monitor-control-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px 20px; border-top: 1px solid var(--night-border, #d7dfce); background: var(--night-surface, #fffefa); }
+.monitor-control-status { display: inline-flex; align-items: center; gap: 8px; color: var(--night-text, #53634a); font-size: 12px; }
+.monitor-control-buttons { display: flex; gap: 12px; margin-left: auto; }
+.monitor-control-button { min-height: 46px; min-width: 124px; padding: 12px 18px; font-size: 14px; font-weight: 600; border-radius: 8px; }
+.monitor-control-stop { color: #973e32; background: #fff2ed; border: 1px solid #c27c6e; }
+.monitor-control-stop:hover { color: #7c2d23; background: #f9e0d7; border-color: #a65b4b; }
+.monitor-control-stop:active { background: #f2d0c4; }
+.monitor-control-buttons .button:focus-visible, .hero-actions .monitor-control-stop:focus-visible { outline: 3px solid var(--night-accent, #466747); outline-offset: 3px; }
+:root[data-theme="dark"] .monitor-control-stop { color: #ffc8b8; background: #472f29; border-color: #b77866; }
+:root[data-theme="dark"] .monitor-control-stop:hover { color: #ffe4d9; background: #603a2f; border-color: #d89b83; }
+:root[data-theme="dark"] .monitor-control-stop:active { background: #704132; }
+@media (max-width: 600px) {
+  .monitor-control-bar { padding: 14px; gap: 12px; }
+  .monitor-control-status { width: 100%; }
+  .monitor-control-buttons { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: 100%; margin-left: 0; gap: 12px; }
+  .monitor-control-button { min-width: 0; min-height: 48px; padding: 12px; }
+  .monitor-control-buttons > button:only-child { grid-column: 1 / -1; }
+}

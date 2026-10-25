@@ -10,7 +10,7 @@ watch(() => store.phase, (phase, previous) => {
     requestAnimationFrame(() => document.querySelector('.monitor-layout')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' }))
   }
 })
-const primaryLabel = computed(() => store.busy ? '正在准备…' : store.phase === 'paused' ? '继续监测' : store.phase === 'ready' ? '开始 8 秒校准' : store.phase === 'calibrating' ? '正在校准…' : store.phase === 'monitoring' ? '暂停一下' : '开始监测')
+const primaryLabel = computed(() => store.busy ? '正在准备…' : store.phase === 'paused' ? '继续监测' : store.phase === 'ready' ? '开始 8 秒校准' : store.phase === 'calibrating' ? '正在校准…' : store.phase === 'monitoring' ? '暂停监测' : '开始监测')
 async function primary() {
   if (store.phase === 'paused') await store.resume()
   else if (store.phase === 'ready') store.beginCalibration()
@@ -42,7 +42,7 @@ const statusDescription = computed(() => {
             {{ primaryLabel }}<ArrowUpRight v-if="store.phase === 'idle'" :size="16" />
           </button>
           <button v-if="store.phase === 'idle'" class="text-button" @click="store.startDemo">先体验一下<ArrowRight :size="16" /></button>
-          <button v-else class="text-button" @click="store.endSession"><Square :size="13" />结束本次</button>
+          <button v-else class="button monitor-control-stop" @click="store.endSession"><Square :size="16" />{{ store.busy ? '取消启动' : '结束监测' }}</button>
         </div>
         <div class="hero-note"><ShieldCheck :size="13" />本地处理 · 不保存摄像头画面</div>
       </div>
