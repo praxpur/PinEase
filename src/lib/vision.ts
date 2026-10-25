@@ -10,25 +10,33 @@ export class VisionCamera {
   private lastVideoTime = -1
   private rejectReady: ((reason: Error) => void) | null = null
 
-  constructor(private onFrame: (frame: VisionFrame) => void, private onError: (message: string) => void) {}
+  constructor(
+    private onFrame: (frame: VisionFrame) => void,
+    private onError: (message: string) => void,
+    private getPreviewVideo: () => HTMLVideoElement | null,
+  ) {}
 
-  async open(cameraId: string, blink: boolean, fps: number): Promise<{ delegate: string; blink: boolean; warning?: string; cameraId: string }> {
+  async open(cameraId: string, facingMode: 'user' | 'environment', blink: boolean, fps: number): Promise<{ delegate: string; blink: boolean; warning?: string; cameraId: string }> {
     this.closed = false
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error('摄像头需要 localhost 或 HTTPS。请通过本地启动地址打开。')
     if (typeof Worker === 'undefined' || typeof createImageBitmap === 'undefined') throw new Error('当前浏览器缺少识别所需能力，请使用新版 Chrome 或 Edge。')
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 }, ...(cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'user' }) },
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 }, ...(cameraId ? { deviceId: { exact: cameraId } } : { facingMode: { ideal: facingMode } }) },
     })
     if (this.closed) { this.stream.getTracks().forEach((t) => t.stop()); throw new Error('已取消启动。') }
-    this.video = document.createElement('video')
+    this.video = this.getPreviewVideo()
+    if (!this.video) {
+      this.stream.getTracks().forEach((track) => track.stop())
+      this.stream = null
+      throw new Error('摄像头预览还未准备好，请返回监测页后重试。')
+    }
     this.video.muted = true
     this.video.playsInline = true
-    this.video.className = 'capture-source'
-    this.video.setAttribute('aria-hidden', 'true')
     this.video.srcObject = this.stream
-    document.body.append(this.video)
-    await this.video.play()
+    await this.video.play().catch(() => {
+      throw new Error('无法播放摄像头画面。请确认浏览器允许自动播放媒体，然后重试。')
+    })
     const track = this.stream.getVideoTracks()[0]
     if (track) track.onended = () => { if (!this.closed) this.onError('摄像头已断开，请重新连接后开始。') }
     this.worker = new Worker(new URL('../workers/vision.worker.ts', import.meta.url), { type: 'module' })
@@ -72,7 +80,7 @@ export class VisionCamera {
     this.worker = null
     this.stream?.getTracks().forEach((track) => { track.onended = null; track.stop() })
     this.stream = null
-    if (this.video) { this.video.pause(); this.video.srcObject = null; this.video.remove() }
+    if (this.video) { this.video.pause(); this.video.srcObject = null }
     this.video = null
     this.busy = false
   }

@@ -8,7 +8,7 @@
 
 本机依赖和识别模型已经准备好。
 
-**Windows：双击目录里的「启动项目.bat」**，然后用 Chrome / Edge 打开：
+**Windows：**在这个目录运行：
 
 http://localhost:5180/
 
@@ -21,6 +21,8 @@ npm.cmd run dev
 请使用终端显示的端口；若 5180 被占用，Vite 会提示其他端口。建议一直使用同一个地址，`localhost` 与 `127.0.0.1`、不同端口分别拥有自己的浏览器存储。
 
 不要直接双击 `index.html`。网页模块、Worker 和摄像头需要通过本地服务或 HTTPS 打开。
+
+手机浏览器请使用部署后的 HTTPS 地址打开。首次启动时允许摄像头权限，在设置页可选择前置或后置摄像头；切换方向后需要重新校准。为保持识别稳定，网页切换到后台会关闭摄像头，返回页面后手动继续。iPhone 可从 Safari 分享菜单添加到主屏幕；Android Chrome 可使用地址栏中的安装提示。通知和安装选项取决于浏览器支持情况。
 
 ## 外观模式
 
@@ -166,6 +168,15 @@ npm.cmd run preview -- --host 127.0.0.1
 `dist` 是静态部署目录，包含页面、Worker、模型与 WASM。部署到 HTTPS 静态站点后，用户仍需自己授权摄像头。
 
 使用 hash 路由与相对资源路径，可部署到静态子目录。不要漏传模型、WASM 或只打开单个 HTML 文件。生产模式才注册 Service Worker。
+
+## Windows 桌面版
+
+```powershell
+npm.cmd run desktop:run
+npm.cmd run build:desktop
+```
+
+第一条命令构建网页并以 Electron 启动；第二条生成 Windows x64 NSIS 安装包，输出在 `release/`。桌面版将识别模型和 WASM 随应用打包，首次启动时仍需允许摄像头。关闭窗口会将应用留在托盘，电脑锁定或睡眠时暂停监测；退出应用会先保存当前记录。
 
 ## 继续开发与软著材料
 

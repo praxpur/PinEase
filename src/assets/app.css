@@ -383,6 +383,75 @@ button svg, a svg { flex: 0 0 auto; }
 :root[data-theme="dark"] .button-primary { background: #9bbd87; border-color: #9bbd87; color: #172116; }
 :root[data-theme="dark"] .button-primary:hover { background: #b0cf9e; border-color: #b0cf9e; }
 :root[data-theme="dark"] .button-danger { background: #a35f4f; color: #fff4ed; }
+
+/* Small-screen touch targets, safe areas, and an active preview video for mobile browsers. */
+@media (max-width: 720px) {
+  .app-shell { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+  .site-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; }
+  .main-nav { justify-content: center; gap: 0; }
+  .main-nav a { justify-content: center; min-width: 44px; min-height: 44px; padding: 0 8px; font-size: 12px; }
+  .header-status { min-width: 0; }
+  .header-live { min-height: 44px; font-size: 10px; white-space: nowrap; }
+  .hero-actions { gap: 10px; flex-wrap: wrap; }
+  .hero-actions .button, .hero-actions .text-button { min-height: 44px; }
+  .camera-panel { min-width: 0; }
+  .camera-stage { aspect-ratio: 4 / 3; }
+  .camera-stage .camera-preview-hidden { opacity: 0; }
+  .camera-footer { padding: 10px max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); gap: 7px 12px; font-size: 11px; }
+  .camera-footer button, .camera-privacy-button { min-height: 44px; padding: 8px; }
+  .camera-inline-controls { gap: 6px; }
+  .camera-mode-select select { min-height: 44px; }
+  .page-heading { flex-wrap: wrap; align-items: flex-start; }
+  .page-heading .button { min-height: 44px; font-size: 12px; }
+  .history-toolbar { align-items: stretch; gap: 8px; flex-wrap: wrap; }
+  .history-toolbar .segmented { max-width: 100%; }
+  .segmented button, .text-button, .setting-link { min-height: 44px; }
+  .history-overview { gap: 18px 0; }
+  .history-overview > div { min-width: 0; }
+  .chart-panel { min-width: 0; }
+  .trend-chart { min-width: 0; height: 218px; }
+  .settings-layout { min-width: 0; }
+  .settings-panel { min-width: 0; padding-left: 16px; padding-right: 16px; }
+  .setting-row { align-items: flex-start; gap: 10px 12px; min-width: 0; }
+  .setting-row > div:first-child { min-width: 0; flex: 1 1 170px; }
+  .setting-row select { min-width: 116px; min-height: 44px; max-width: 48%; padding: 8px 24px 8px 9px; font-size: 12px; }
+  .setting-row p { font-size: 11px; }
+  .app-switch { flex: 0 0 44px; width: 44px; height: 28px; padding: 3px; }
+  .switch-thumb { width: 20px; height: 20px; }
+  .app-switch[data-state="checked"] .switch-thumb { transform: translateX(16px); }
+  .small-button { min-height: 44px; padding: 8px 12px; font-size: 12px; }
+  .number-control { min-height: 44px; }
+  .number-control input { min-height: 42px; font-size: 16px; }
+  .range-control { min-height: 44px; }
+  .range-control input { min-height: 44px; }
+  .backup-actions { flex-wrap: wrap; }
+  .backup-actions .button { min-height: 44px; font-size: 12px; }
+  .dialog-content { width: calc(100vw - 24px); max-height: calc(100dvh - max(24px, env(safe-area-inset-top)) - max(24px, env(safe-area-inset-bottom))); padding: 20px; }
+  .dialog-actions { flex-wrap: wrap; }
+  .dialog-actions .button { min-height: 44px; }
+  .toast-message { right: max(12px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); width: calc(100vw - max(24px, env(safe-area-inset-left) + env(safe-area-inset-right))); }
+  .site-footer { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+}
+@media (max-width: 390px) {
+  .site-header { gap: 5px; }
+  .brand { gap: 5px; }
+  .brand > span { font-size: 18px; }
+  .brand small { letter-spacing: 1.5px; }
+  .main-nav a { min-width: 40px; padding: 0 5px; font-size: 11px; }
+  .header-live { font-size: 0; gap: 5px; }
+  .header-live .status-dot { width: 8px; height: 8px; }
+  .app-shell { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+  .setting-row select { max-width: 46%; }
+  .camera-footer { gap: 4px; }
+}
+@media (max-height: 500px) and (orientation: landscape) and (max-width: 950px) {
+  .site-header { height: 58px; }
+  .monitor-hero { padding-top: 18px; padding-bottom: 18px; }
+  .monitor-hero h1 { margin-top: 10px; font-size: clamp(28px, 6vw, 38px); }
+  .hero-description { margin-top: 8px; }
+  .camera-stage { aspect-ratio: 16 / 8; }
+  .site-footer { padding-top: 14px; padding-bottom: 14px; }
+}
 :root[data-theme="dark"] .state-symbol.green { color: #b1d49b; background: #30462e; }
 :root[data-theme="dark"] .state-symbol.amber { color: #e6bd86; background: #463b29; }
 :root[data-theme="dark"] .state-symbol.soft, :root[data-theme="dark"] .demo-badge { color: #d1c997; background: #3a3c2b; }

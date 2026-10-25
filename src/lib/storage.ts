@@ -61,6 +61,7 @@ export function sanitizeSettings(value: unknown): Settings {
   const flag = (key: keyof Settings): boolean => typeof v[key] === 'boolean' ? v[key] as boolean : defaults[key] as boolean
   return {
     cameraId: typeof v.cameraId === 'string' ? v.cameraId.slice(0, 256) : '',
+    cameraFacingMode: v.cameraFacingMode === 'environment' ? 'environment' : 'user',
     view: v.view === 'side' ? 'side' : 'front',
     showPreview: flag('showPreview'), showSkeleton: flag('showSkeleton'),
     sensitivity: bounded(v.sensitivity, 0.6, 1.6, defaults.sensitivity),

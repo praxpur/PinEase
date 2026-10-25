@@ -11,6 +11,8 @@ node_modules
 /.npm-cache
 .DS_Store
 dist
+release
+.electron-cache
 dist-ssr
 coverage
 *.local

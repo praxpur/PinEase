@@ -16,7 +16,10 @@ function changeTheme(event: Event) {
   if (value === 'system' || value === 'light' || value === 'dark') setTheme(value as ThemePreference)
 }
 function number(key: keyof Settings, event: Event) { void store.updateSettings({ [key]: Number((event.target as HTMLInputElement).value) }) }
-function selected(key: 'cameraId' | 'view', event: Event) { void store.updateSettings({ [key]: (event.target as HTMLSelectElement).value }) }
+function selected(key: 'cameraId' | 'view' | 'cameraFacingMode', event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  void store.updateSettings(key === 'cameraFacingMode' ? { cameraFacingMode: value === 'environment' ? 'environment' : 'user', cameraId: '' } : { [key]: value })
+}
 async function importFile(event: Event) {
   const selectedFile = (event.target as HTMLInputElement).files?.[0]
   if (!selectedFile) return
@@ -49,6 +52,7 @@ async function confirmAction() {
         </section>
         <section class="settings-panel">
           <h2><Camera :size="18" />摄像头与参考坐姿</h2>
+          <div class="setting-row"><div><label for="camera-facing">手机摄像头方向</label><p>切换后需要按新机位重新校准</p></div><select id="camera-facing" :value="store.settings.cameraFacingMode" :disabled="store.busy" @change="selected('cameraFacingMode', $event)"><option value="user">前置摄像头</option><option value="environment">后置摄像头</option></select></div>
           <div class="setting-row"><div><label for="camera">使用的摄像头</label><p>开始监测并授权后可看到设备名称</p></div><select id="camera" :value="store.settings.cameraId" :disabled="store.busy" @change="selected('cameraId', $event)"><option value="">默认摄像头</option><option v-for="(device, index) in store.devices" :key="device.deviceId" :value="device.deviceId">{{ device.label || '摄像头 ' + (index + 1) }}</option></select></div>
           <div class="setting-row"><div><label for="view">拍摄机位</label><p>每个机位使用独立的参考坐姿</p></div><select id="view" :value="store.settings.view" :disabled="store.busy" @change="selected('view', $event)"><option value="front">正面 · 头部与双肩</option><option value="side">侧面 · 耳朵与肩膀</option></select></div>
           <div class="setting-row"><div><label for="fps">运行节奏</label><p>设备发热或卡顿时可以选择节能</p></div><select id="fps" :value="store.settings.fps" @change="number('fps', $event)"><option :value="7">节能</option><option :value="12">平衡</option><option :value="20">顺畅</option></select></div>

@@ -53,6 +53,8 @@ export const useMonitorStore = defineStore('monitor', () => {
   const restOpen = ref(false)
   const restRemaining = ref(0)
   const restKind = ref<ReminderKind>('break')
+  const desktopRuntime = ref(false)
+  let cameraPreview: HTMLVideoElement | null = null
 
   let camera: VisionCamera | null = null
   let token = 0
@@ -110,8 +112,9 @@ export const useMonitorStore = defineStore('monitor', () => {
       sessions.value = data.sessions
     } catch { storageWarning.value = '浏览器存储暂不可用，本次记录只会保留在当前页面。你仍可以导出备份。' }
     await refreshDevices()
+    desktopRuntime.value = window.pineaseDesktop?.isDesktop === true
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && running.value) pause('页面移到后台，已暂停监测')
+      if (!desktopRuntime.value && document.hidden && running.value) pause('页面移到后台，已暂停监测')
     })
     window.addEventListener('pagehide', () => {
       camera?.close()
@@ -242,10 +245,10 @@ export const useMonitorStore = defineStore('monitor', () => {
       if (generation !== token) return
       error.value = message
       void endSession()
-    }))
+    }, () => cameraPreview))
     camera = active
     try {
-      const result = await active.open(settings.value.cameraId, settings.value.blinkEnabled, settings.value.fps)
+      const result = await active.open(settings.value.cameraId, settings.value.cameraFacingMode, settings.value.blinkEnabled, settings.value.fps)
       if (generation !== token) { active.close(); return }
       cameraId.value = result.cameraId
       stream.value = active.stream ? markRaw(active.stream) : null
@@ -360,6 +363,14 @@ export const useMonitorStore = defineStore('monitor', () => {
     landmarks.value = frame.landmarks
     frameWidth.value = frame.width
     frameHeight.value = frame.height
+    const calibrated = profile.value
+    if (calibrated && Math.abs(calibrated.aspect - frame.width / frame.height) > 0.08 && !profileMismatch) {
+      profileMismatch = true
+      phase.value = 'ready'
+      state.value = 'need_cal'
+      reason.value = '画面比例变了，请重新校准'
+      announce('需要重新校准', '摄像头方向或画面比例已变化，请重新校准后继续监测。')
+    }
     inferenceMs.value = frame.inferenceMs
     handleObservation(frame.landmarks, lastFrame, frame.width, frame.height)
     if (phase.value === 'ready' || phase.value === 'monitoring') {
@@ -521,7 +532,7 @@ export const useMonitorStore = defineStore('monitor', () => {
 
   async function updateSettings(partial: Partial<Settings>) {
     const next = storage.sanitizeSettings({ ...settings.value, ...partial })
-    const needsRestart = next.view !== settings.value.view || next.cameraId !== settings.value.cameraId || next.blinkEnabled !== settings.value.blinkEnabled || next.fps !== settings.value.fps
+    const needsRestart = next.view !== settings.value.view || next.cameraId !== settings.value.cameraId || next.cameraFacingMode !== settings.value.cameraFacingMode || next.blinkEnabled !== settings.value.blinkEnabled || next.fps !== settings.value.fps
     if (needsRestart && (running.value || phase.value === 'paused' || busy.value)) await endSession()
     settings.value = next
     if (next.soundEnabled) prepareAudio()
@@ -577,6 +588,23 @@ export const useMonitorStore = defineStore('monitor', () => {
 
   function dismissToast() { toast.value = null }
 
+  function bindCameraPreview(video: HTMLVideoElement | null) { cameraPreview = video }
+
+  function updateVideoSize(width: number, height: number) {
+    if (!width || !height) return
+    frameWidth.value = width
+    frameHeight.value = height
+  }
+
+  async function handleDesktopCommand(command: 'pause' | 'resume' | 'quit') {
+    if (command === 'pause') pause('电脑锁定或进入睡眠，监测已暂停')
+    if (command === 'resume') await resume()
+    if (command === 'quit') {
+      await endSession()
+      window.pineaseDesktop?.readyToQuit()
+    }
+  }
+
   function dismissFun() {
     if (funTimer !== null) window.clearTimeout(funTimer)
     funTimer = null
@@ -595,12 +623,12 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   return {
-    settings, profiles, sessions, records, phase, state, reason, error, storageWarning, initialized, busy, running,
+    settings, profiles, sessions, records, phase, state, reason, error, storageWarning, initialized, busy, running, desktopRuntime,
     demo, demoPose, stream, landmarks, frameWidth, frameHeight, quality, inferenceMs, engine, devices,
     calibrationProgress, calibrationSamples, feature, deviation, session, today, elapsed, profile,
     continuousSeconds, blinkRate, blinkAvailable, blinkCount, blinkObservedSeconds, blinkStatus, toast, restOpen, restRemaining, restKind, stateLabel, stateColor,
     init, startCamera, startDemo, beginCalibration, pause, resume, endSession, updateSettings, refreshDevices,
     requestNotifications, resetProfiles, exportBackup, exportCSV, importBackup, deleteHistory, dismissToast,
-    closeRest, announce, previewSound, funMoment, dismissFun,
+    closeRest, announce, previewSound, funMoment, dismissFun, bindCameraPreview, updateVideoSize, handleDesktopCommand,
   }
 })

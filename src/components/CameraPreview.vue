@@ -21,6 +21,12 @@ async function attach() {
   video.value.srcObject = store.stream
   if (store.stream) { try { await video.value.play() } catch { /* 视频等待挂载后播放 */ } }
 }
+function updateVideoSize() {
+  const source = video.value
+  if (!source?.videoWidth || !source.videoHeight) return
+  store.updateVideoSize(source.videoWidth, source.videoHeight)
+  draw()
+}
 function draw() {
   const target = canvas.value
   if (!target) return
@@ -60,10 +66,19 @@ function draw() {
 watch(() => store.stream, attach)
 watch(() => [store.landmarks, store.settings.showSkeleton, store.settings.showPreview], draw)
 onMounted(() => {
+  if (video.value) store.bindCameraPreview(video.value)
   void attach()
   if (canvas.value) { resize = new ResizeObserver(draw); resize.observe(canvas.value) }
+  window.addEventListener('resize', updateVideoSize)
+  window.addEventListener('orientationchange', updateVideoSize)
 })
-onBeforeUnmount(() => { resize?.disconnect(); if (video.value) video.value.srcObject = null })
+onBeforeUnmount(() => {
+  resize?.disconnect()
+  window.removeEventListener('resize', updateVideoSize)
+  window.removeEventListener('orientationchange', updateVideoSize)
+  if (video.value) video.value.srcObject = null
+  store.bindCameraPreview(null)
+})
 </script>
 
 <template>
@@ -76,7 +91,7 @@ onBeforeUnmount(() => { resize?.disconnect(); if (video.value) video.value.srcOb
       <span v-else class="small-uppercase">A LITTLE MORE AT EASE</span>
     </div>
     <div class="camera-stage">
-      <video ref="video" autoplay muted playsinline :class="{ invisible: !hasPreview }" />
+      <video ref="video" autoplay muted playsinline @loadedmetadata="updateVideoSize" :class="{ 'camera-preview-hidden': !hasPreview }" />
       <canvas ref="canvas" :class="{ invisible: !hasPreview }" />
       <div v-if="!hasPreview" class="camera-placeholder">
         <PostureIllustration v-if="!store.stream && store.phase !== 'paused'" :view="store.demo && store.phase !== 'idle' ? 'front' : store.settings.view" :bad="store.demo && store.phase !== 'idle' && store.demoPose === 'bad'" />

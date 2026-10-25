@@ -1,5 +1,6 @@
 export type ViewMode = 'front' | 'side'
 export type TrackingSide = 'left' | 'right'
+export type CameraFacingMode = 'user' | 'environment'
 export type Phase = 'idle' | 'loading' | 'ready' | 'calibrating' | 'monitoring' | 'paused'
 export type PostureState = 'need_cal' | 'normal' | 'candidate_bad' | 'bad' | 'unknown' | 'absent' | 'paused'
 export type ReminderKind = 'posture' | 'break' | 'eyes'
@@ -15,6 +16,7 @@ export interface Landmark {
 
 export interface Settings {
   cameraId: string
+  cameraFacingMode: CameraFacingMode
   view: ViewMode
   showPreview: boolean
   showSkeleton: boolean
@@ -120,6 +122,7 @@ export type VisionReply =
 
 export const DEFAULT_SETTINGS: Settings = {
   cameraId: '',
+  cameraFacingMode: 'user',
   view: 'front',
   showPreview: true,
   showSkeleton: true,
