@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="./icon.svg">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <meta name="theme-color" content="#f8f7f2">
+    <script>
+      (() => {
+        let theme = 'system'
+        try { theme = localStorage.getItem('pinease-theme') || 'system' } catch {}
+        const dark = theme === 'dark' || (theme !== 'light' && theme !== 'dark' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        document.querySelector('meta[name="theme-color"]').content = dark ? '#171e19' : '#f8f7f2'
+      })()
+    </script>
+    <meta name="description" content="PinEase 青松坐姿，一个安静的桌边提醒。摄像头画面在本地处理，参考坐姿与专注记录属于你。">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PinEase · 青松坐姿</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

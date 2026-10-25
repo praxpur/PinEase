@@ -1,0 +1,7 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>识别初始化检查</title><h1>识别初始化检查</h1><pre id="result">加载中（不使用摄像头）</pre><script type="module">
+const worker=new Worker(new URL('../src/workers/vision.worker.ts',import.meta.url),{type:'module'});
+const output=document.querySelector('#result');
+worker.onerror=e=>output.textContent='Worker error: '+e.message;
+worker.onmessage=async e=>{output.textContent+='\n'+JSON.stringify(e.data,null,2);if(e.data.type==='ready'){const canvas=new OffscreenCanvas(640,480);const context=canvas.getContext('2d');context.fillStyle='#888';context.fillRect(0,0,640,480);const bitmap=canvas.transferToImageBitmap();worker.postMessage({type:'frame',bitmap,timestamp:performance.now()},[bitmap]);}if(e.data.type==='frame'){output.textContent+='\nPASS：双模型已加载，并完成空白画面推理（不代表真人识别精度）。';worker.terminate();}};
+worker.postMessage({type:'init',assets:new URL('../',location.href).href,blink:true});
+</script></html>

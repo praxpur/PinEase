@@ -1,0 +1,13 @@
+{
+  "name": "PinEase · 青松坐姿",
+  "short_name": "PinEase",
+  "description": "一个安静的桌边坐姿提醒。画面留在本地，记录属于你。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8f7f2",
+  "theme_color": "#f8f7f2",
+  "lang": "zh-CN",
+  "icons": [{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]
+}
+
