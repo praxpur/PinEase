@@ -86,6 +86,7 @@ export function validCalibration(v: unknown): v is Calibration {
   if (!v || typeof v !== 'object') return false
   const p = v as Calibration
   const b = p.baseline
+  const optionalMetric = (value: unknown) => value === undefined || value === null || finite(value)
   return typeof p.id === 'string' && (p.view === 'front' || p.view === 'side')
     && typeof p.cameraId === 'string' && finite(p.aspect) && p.aspect > 0
     && finite(p.createdAt) && finite(p.sampleCount) && p.sampleCount >= 20
@@ -93,6 +94,10 @@ export function validCalibration(v: unknown): v is Calibration {
     && finite(b.drop) && finite(b.shift) && finite(b.shoulders) && finite(b.scale)
     && b.side === p.side && (p.view !== 'side' || finite(b.neck))
     && (b.neck === null || finite(b.neck)) && (b.torso === null || finite(b.torso))
+    && (p.featureVersion === undefined || p.featureVersion === 2)
+    && optionalMetric(b.headPitch) && optionalMetric(b.neckHeight) && optionalMetric(b.torsoHeight)
+    && (b.headPitch == null || Math.abs(b.headPitch) <= 90)
+    && (b.neckHeight == null || b.neckHeight > 0) && (b.torsoHeight == null || b.torsoHeight > 0)
 }
 
 function validDate(value: unknown): value is number {

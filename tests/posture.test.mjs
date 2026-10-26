@@ -103,3 +103,120 @@ test('stable frontal calibration remains valid when the better ear alternates', 
   assert.equal(calibration.sampleCount, 30)
   assert.equal(classify(values[0], calibration, settings).bad, false)
 })
+
+function frontalFrame() {
+  const points = Array.from({ length: 33 }, () => point(0, 0, .1))
+  points[0] = point(.5, .3)
+  points[7] = point(.43, .29); points[8] = point(.57, .29)
+  points[11] = point(.35, .55); points[12] = point(.65, .55)
+  points[23] = point(.38, .88); points[24] = point(.62, .88)
+  return points
+}
+function verticalReference(points, view = 'front') {
+  const read = frame => observe(frame, 640, 480, view, 'left').features
+  const reference = makeCalibration(Array.from({ length: 40 }, () => read(points)), view, 'camera', 4 / 3)
+  return { read, reference, verdict: frame => classify(read(frame), reference, settings) }
+}
+
+test('frontal nose-ear y changes distinguish lowering and raising the head', () => {
+  const { verdict, reference } = verticalReference(frontalFrame())
+  assert.equal(reference.featureVersion, 2)
+  for (const [offset, reason] of [[.07, '头部有些低下'], [-.06, '头部有些抬高']]) {
+    const moved = frontalFrame(); moved[0].y += offset
+    assert.equal(verdict(moved).reason, reason)
+  }
+})
+
+test('side view detects nose-ear pitch changes without requiring visible hips', () => {
+  const base = profileFrame(2, 'left')
+  const { verdict, reference } = verticalReference(base, 'side')
+  assert.equal(reference.baseline.torsoHeight, null)
+  for (const [offset, reason] of [[.06, '头部有些低下'], [-.06, '头部有些抬高']]) {
+    const moved = structuredClone(base); moved[0].y += offset
+    assert.equal(verdict(moved).reason, reason)
+  }
+})
+
+test('combined head-shoulder sinking and torso compression reports possible slouching', () => {
+  const { verdict } = verticalReference(frontalFrame())
+  const slouch = frontalFrame()
+  for (const index of [7, 8]) slouch[index].y += .08
+  slouch[0].y += .1
+  for (const index of [11, 12]) slouch[index].y += .05
+  assert.equal(verdict(slouch).bad, true)
+  assert.match(verdict(slouch).reason, /含胸/)
+})
+
+test('side-view vertical contraction also detects slouching with a stable visible hip', () => {
+  const base = profileFrame(2, 'left')
+  base[23] = point(.45, .85)
+  const { verdict } = verticalReference(base, 'side')
+  const slouch = structuredClone(base)
+  slouch[7].y += .1; slouch[0].y += .1; slouch[11].y += .055
+  assert.match(verdict(slouch).reason, /含胸/)
+})
+
+test('pitch rotation preserves the side-view head length and does not invent torso compression', () => {
+  const base = profileFrame(2, 'left'); base[23] = point(.45, .85)
+  const { verdict, read, reference } = verticalReference(base, 'side')
+  const rotated = structuredClone(base)
+  const dx = (base[0].x - base[7].x) * 640
+  const dy = (base[0].y - base[7].y) * 480
+  const rotation = 25 * Math.PI / 180
+  rotated[0].x = base[7].x + (dx * Math.cos(rotation) - dy * Math.sin(rotation)) / 640
+  rotated[0].y = base[7].y + (dx * Math.sin(rotation) + dy * Math.cos(rotation)) / 480
+  assert.equal(verdict(rotated).reason, '头部有些低下')
+  assert.ok(Math.abs(read(rotated).torsoHeight - reference.baseline.torsoHeight) < 1e-8)
+})
+
+test('uniform y translation and modest uniform scaling preserve the calibrated posture', () => {
+  const { verdict, read, reference } = verticalReference(frontalFrame())
+  const translated = frontalFrame().map(p => ({ ...p, y: p.y + .04 }))
+  const scaled = frontalFrame().map(p => ({ ...p, x: .5 + (p.x - .5) * 1.1, y: .5 + (p.y - .5) * 1.1 }))
+  for (const points of [translated, scaled]) {
+    assert.equal(verdict(points).bad, false)
+    for (const key of ['headPitch', 'neckHeight', 'torsoHeight']) assert.ok(Math.abs(read(points)[key] - reference.baseline[key]) < 1e-8, key)
+  }
+})
+
+test('shoulder shrug alone is not reported as lowering the head or slouching', () => {
+  const { verdict } = verticalReference(frontalFrame())
+  const shrug = frontalFrame()
+  shrug[11].y -= .065; shrug[12].y -= .065
+  assert.equal(verdict(shrug).bad, false)
+})
+
+test('missing hips suppress torso measurements without fabricating a spine verdict', () => {
+  const { read, reference } = verticalReference(frontalFrame())
+  const hidden = frontalFrame(); hidden[23].visibility = .1; hidden[24].y = 1.2
+  const features = read(hidden)
+  assert.equal(features.torsoHeight, null)
+  assert.equal(classify(features, reference, settings).bad, false)
+  const missing = makeCalibration(Array.from({ length: 40 }, () => features), 'front', 'camera', 4 / 3)
+  assert.equal(missing.baseline.torsoHeight, null)
+})
+
+test('head yaw, missing ears and unstable optional metrics do not invent pitch references', () => {
+  const { read } = verticalReference(frontalFrame())
+  const turned = frontalFrame(); turned[0].x = .57
+  assert.equal(read(turned).headPitch, null)
+  const missing = frontalFrame(); missing[7].presence = .1
+  assert.equal(read(missing).headPitch, null)
+  const moving = Array.from({ length: 40 }, (_, i) => ({ ...read(frontalFrame()), headPitch: i % 2 ? 30 : -30, torsoHeight: i % 2 ? 1.5 : .3 }))
+  const reference = makeCalibration(moving, 'front', 'camera', 4 / 3)
+  assert.equal(reference.baseline.headPitch, null)
+  assert.equal(reference.baseline.torsoHeight, null)
+})
+
+test('smoothing clears unavailable vertical metrics immediately and keeps legacy profiles compatible', () => {
+  const { read, reference } = verticalReference(frontalFrame())
+  const next = { ...read(frontalFrame()), headPitch: null, neckHeight: null, torsoHeight: null }
+  const smoothed = smoothFeatures(read(frontalFrame()), next, .1)
+  assert.equal(smoothed.headPitch, null); assert.equal(smoothed.torsoHeight, null)
+  const legacy = structuredClone(reference)
+  delete legacy.featureVersion
+  for (const key of ['headPitch', 'neckHeight', 'torsoHeight']) delete legacy.baseline[key]
+  const verdict = classify(smoothed, legacy, settings)
+  assert.equal(verdict.bad, false)
+  assert.ok(Number.isFinite(verdict.deviation))
+})

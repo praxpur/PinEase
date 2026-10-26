@@ -44,6 +44,19 @@ function storeHarness({pending=false,saveGate=null}={}) {
   return{store,instances,async tick(ms=1000){now+=ms;for(const fn of [...intervals.values()])fn();await Promise.resolve()}}
 }
 
+test('vertical posture update requires recalibration once while preserving old profiles and history', async () => {
+  for (const featureVersion of [undefined, 2]) {
+    const { store } = storeHarness()
+    store.profiles = [{ id: 'test-camera:front', cameraId: 'test-camera', view: 'front', aspect: 4 / 3, side: 'left', createdAt: 1000, sampleCount: 40,
+      ...(featureVersion ? { featureVersion } : {}), baseline: { side: 'left', neck: 0, torso: 0, drop: -.5, shift: 0, shoulders: 0, scale: .3 } }]
+    await store.startCamera()
+    assert.equal(store.profiles.length, 1)
+    assert.equal(store.phase, featureVersion ? 'monitoring' : 'ready')
+    if (!featureVersion) assert.match(store.reason, /重新校准/)
+    await store.endSession()
+  }
+})
+
 test('session: completing an old save cannot erase a newly started session',async()=>{
   const gate=deferred(),h=storeHarness({saveGate:gate})
   await h.store.startCamera();const old=h.store.session.id
@@ -137,6 +150,11 @@ test('backup: invalid dates, impossible durations and side profiles without a ne
   const profile={id:'side',view:'side',cameraId:'camera',aspect:1.3,createdAt:1000,sampleCount:20,side:'left',baseline:{side:'left',neck:null,torso:null,drop:0,shift:0,shoulders:0,scale:0}}
   assert.equal(validCalibration(profile),false)
   assert.equal(validCalibration({...profile,baseline:{...profile.baseline,neck:15}}),true)
+  const vertical = { ...profile, featureVersion: 2, baseline: { ...profile.baseline, neck: 15, headPitch: 8, neckHeight: .5, torsoHeight: 1.2 } }
+  assert.equal(validCalibration(vertical), true)
+  for (const invalid of [{ headPitch: NaN }, { headPitch: 120 }, { neckHeight: -1 }, { torsoHeight: Infinity }]) {
+    assert.equal(validCalibration({ ...vertical, baseline: { ...vertical.baseline, ...invalid } }), false)
+  }
 })
 
 const {isTrustedUrl,canRequest,canCheck}=require('../electron/permissions.cjs')

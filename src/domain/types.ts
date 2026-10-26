@@ -44,9 +44,14 @@ export interface Features {
   shoulders: number
   scale: number
   side: TrackingSide
+  // Optional for profiles saved before vertical posture measurements were introduced.
+  headPitch?: number | null
+  neckHeight?: number | null
+  torsoHeight?: number | null
 }
 
 export interface Calibration {
+  featureVersion?: number
   id: string
   view: ViewMode
   cameraId: string

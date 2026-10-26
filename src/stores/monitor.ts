@@ -1,7 +1,7 @@
 import { computed, markRaw, ref, shallowRef, toRaw } from 'vue'
 import { defineStore } from 'pinia'
 import { DEFAULT_SETTINGS, STATE_LABELS, type Calibration, type DemoPose, type Features, type Landmark, type Phase, type PostureState, type ReminderKind, type SessionRecord, type Settings, type VisionFrame } from '@/domain/types'
-import { classify, makeCalibration, observe, smoothFeatures } from '@/domain/posture'
+import { classify, makeCalibration, observe, smoothFeatures, POSTURE_FEATURE_VERSION } from '@/domain/posture'
 import * as storage from '@/lib/storage'
 import { dailyStats, downloadFile, localDay } from '@/lib/format'
 import { DEMO_FEATURES, demoCalibration } from '@/lib/demo'
@@ -256,10 +256,11 @@ export const useMonitorStore = defineStore('monitor', () => {
       frameWidth.value = active.video?.videoWidth || 640
       frameHeight.value = active.video?.videoHeight || 480
       const aspect = frameWidth.value / frameHeight.value
-      profileMismatch = !!profile.value && Math.abs(profile.value.aspect - aspect) > 0.08
+      const updatedFeatures = !!profile.value && profile.value.featureVersion !== POSTURE_FEATURE_VERSION
+      profileMismatch = updatedFeatures || !!profile.value && Math.abs(profile.value.aspect - aspect) > 0.08
       phase.value = profile.value && !profileMismatch ? 'monitoring' : 'ready'
       state.value = phase.value === 'monitoring' ? 'unknown' : 'need_cal'
-      reason.value = profileMismatch ? '画面比例变了，请重新校准' : profile.value ? '等待识别你的坐姿' : '准备好后，花 8 秒建立参考坐姿'
+      reason.value = updatedFeatures ? '已新增抬低头与躯干检测，请重新校准' : profileMismatch ? '画面比例变了，请重新校准' : profile.value ? '等待识别你的坐姿' : '准备好后，花 8 秒建立参考坐姿'
       if (!session.value) createSession('real')
       else lastTick = performance.now()
       if (result.warning) announce('坐姿监测已准备好', result.warning)
@@ -425,9 +426,10 @@ export const useMonitorStore = defineStore('monitor', () => {
       feature.value = null
       lastSmooth = 0
       void queueSave(() => storage.saveCalibration(result))
-      announce('校准完成', result.view === 'side' && result.baseline.torso === null
-        ? '已建立侧面头颈参考；髋部未持续清晰入镜，本次不判断躯干。'
-        : '换机位或坐得更近时，可以随时重新校准。')
+      const coverage = []
+      if (result.baseline.headPitch == null) coverage.push('鼻耳位置未持续清晰，头部俯仰参考未启用')
+      if (result.baseline.torsoHeight == null) coverage.push('髋部参考不足，含胸与上身下沉检测未启用')
+      announce('校准完成', coverage.length ? coverage.join('；') + '。其余检测继续工作。' : '已建立头部俯仰与躯干高度参考。换机位后请重新校准。')
     } catch (failure) {
       phase.value = 'ready'
       state.value = 'need_cal'
