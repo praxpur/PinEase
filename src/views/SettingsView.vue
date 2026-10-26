@@ -10,7 +10,7 @@ const store = useMonitorStore()
 const confirm = ref<'history' | 'calibration' | 'defaults' | null>(null)
 const file = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
-const notificationSupported = computed(() => 'Notification' in window)
+const notificationSupported = computed(() => !store.desktopRuntime && 'Notification' in window)
 function changeTheme(event: Event) {
   const value = (event.target as HTMLSelectElement).value
   if (value === 'system' || value === 'light' || value === 'dark') setTheme(value as ThemePreference)
@@ -42,7 +42,7 @@ async function confirmAction() {
 
 <template>
   <div class="page-enter">
-    <header class="page-heading"><div><div class="eyebrow">MAKE IT YOURS</div><h1>以你的节奏。</h1><p>调整提醒的轻重，给专注留出空间。</p></div></header>
+    <header class="page-heading"><div><div class="eyebrow">MAKE IT YOURS</div><h1>以你的节奏。</h1><p>{{ store.desktopRuntime ? '桌面应用可最小化到托盘；电脑锁屏或睡眠时会暂停。' : '调整提醒的轻重，给专注留出空间。切到后台时网页会暂停监测。' }}</p></div></header>
     <div class="settings-layout">
       <aside class="settings-note"><LeafIllustration /><h2>每个人的桌边，<br />都不太一样。</h2><p>换了摄像头、机位或座椅高度，重新校准会更合适。</p><RouterLink to="/" class="text-link">回到监测<ArrowUpRight :size="15" /></RouterLink><div class="settings-note-bottom"><ShieldCheck :size="17" /><span>设置与记录<br />保存在这台设备上</span></div></aside>
       <div class="settings-sections">
@@ -52,7 +52,7 @@ async function confirmAction() {
         </section>
         <section class="settings-panel">
           <h2><Camera :size="18" />摄像头与参考坐姿</h2>
-          <div class="setting-row"><div><label for="camera-facing">手机摄像头方向</label><p>切换后需要按新机位重新校准</p></div><select id="camera-facing" :value="store.settings.cameraFacingMode" :disabled="store.busy" @change="selected('cameraFacingMode', $event)"><option value="user">前置摄像头</option><option value="environment">后置摄像头</option></select></div>
+          <div v-if="!store.desktopRuntime" class="setting-row"><div><label for="camera-facing">手机摄像头方向</label><p>切换后需要按新机位重新校准</p></div><select id="camera-facing" :value="store.settings.cameraFacingMode" :disabled="store.busy" @change="selected('cameraFacingMode', $event)"><option value="user">前置摄像头</option><option value="environment">后置摄像头</option></select></div>
           <div class="setting-row"><div><label for="camera">使用的摄像头</label><p>开始监测并授权后可看到设备名称</p></div><select id="camera" :value="store.settings.cameraId" :disabled="store.busy" @change="selected('cameraId', $event)"><option value="">默认摄像头</option><option v-for="(device, index) in store.devices" :key="device.deviceId" :value="device.deviceId">{{ device.label || '摄像头 ' + (index + 1) }}</option></select></div>
           <div class="setting-row"><div><label for="view">拍摄机位</label><p>每个机位使用独立的参考坐姿</p></div><select id="view" :value="store.settings.view" :disabled="store.busy" @change="selected('view', $event)"><option value="front">正面 · 头部与双肩</option><option value="side">侧面 · 耳朵与肩膀</option></select></div>
           <div class="setting-row"><div><label for="fps">运行节奏</label><p>设备发热或卡顿时可以选择节能</p></div><select id="fps" :value="store.settings.fps" @change="number('fps', $event)"><option :value="7">节能</option><option :value="12">平衡</option><option :value="20">顺畅</option></select></div>
@@ -70,7 +70,7 @@ async function confirmAction() {
           <div class="setting-row"><div><label for="sound-volume">提示音量</label><p>试听后按环境调整；同时检查系统音量</p></div><div class="range-control"><input id="sound-volume" type="range" min="0" max="100" step="5" :value="store.settings.soundVolume" @input="number('soundVolume', $event)" /><span>{{ store.settings.soundVolume }}%</span></div></div>
           <div class="setting-row"><div><label for="sound-repeats">每次响铃</label><p>增加响铃次数，让提醒更容易听到</p></div><select id="sound-repeats" :value="store.settings.soundRepeats" @change="number('soundRepeats', $event)"><option :value="1">1 声</option><option :value="2">2 声</option><option :value="3">3 声</option></select></div>
           <div class="setting-row"><div><strong>试听提示音</strong><p>按当前音量和次数试听，不改变声音开关</p></div><button class="small-button" @click="store.previewSound">试听</button></div>
-          <div class="setting-row"><div><strong>浏览器通知</strong><p>{{ notificationSupported ? store.settings.notificationsEnabled ? '浏览器通知已开启' : '由你决定是否允许通知' : '此浏览器使用页面内提醒' }}</p></div><button class="small-button" :disabled="!notificationSupported" @click="store.settings.notificationsEnabled ? store.updateSettings({ notificationsEnabled: false }) : store.requestNotifications()">{{ store.settings.notificationsEnabled ? '关闭通知' : '允许通知' }}</button></div>
+          <div v-if="!store.desktopRuntime" class="setting-row"><div><strong>浏览器通知</strong><p>{{ notificationSupported ? store.settings.notificationsEnabled ? '浏览器通知已开启' : '由你决定是否允许通知' : '此浏览器使用页面内提醒' }}</p></div><button class="small-button" :disabled="!notificationSupported" @click="store.settings.notificationsEnabled ? store.updateSettings({ notificationsEnabled: false }) : store.requestNotifications()">{{ store.settings.notificationsEnabled ? '关闭通知' : '允许通知' }}</button></div>
           <div class="setting-row"><div><strong>更明显的页面提示</strong><p>持续偏离时淡入休息画面，随时可以退出</p></div><AppSwitch :model-value="store.settings.focusReminder" label="更明显的页面提示" @update:model-value="store.updateSettings({ focusReminder: $event })" /></div>
         </section>
 

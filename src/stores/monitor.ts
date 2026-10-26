@@ -53,7 +53,7 @@ export const useMonitorStore = defineStore('monitor', () => {
   const restOpen = ref(false)
   const restRemaining = ref(0)
   const restKind = ref<ReminderKind>('break')
-  const desktopRuntime = ref(false)
+  const desktopRuntime = ref(window.pineaseDesktop?.isDesktop === true)
   let cameraPreview: HTMLVideoElement | null = null
 
   let camera: VisionCamera | null = null
@@ -112,7 +112,6 @@ export const useMonitorStore = defineStore('monitor', () => {
       sessions.value = data.sessions
     } catch { storageWarning.value = '浏览器存储暂不可用，本次记录只会保留在当前页面。你仍可以导出备份。' }
     await refreshDevices()
-    desktopRuntime.value = window.pineaseDesktop?.isDesktop === true
     document.addEventListener('visibilitychange', () => {
       if (!desktopRuntime.value && document.hidden && (running.value || busy.value)) pause('页面移到后台，已暂停监测')
     })
@@ -513,7 +512,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     session.value?.reminders.push({ at: Date.now(), kind, message })
     announce(kind === 'posture' ? '坐得舒服一些' : kind === 'eyes' ? '给眼睛一点休息' : '该活动一下了', message, 'reminder')
     void playCue()
-    if (settings.value.notificationsEnabled && !demo.value && 'Notification' in window && Notification.permission === 'granted') {
+    if (!desktopRuntime.value && settings.value.notificationsEnabled && !demo.value && 'Notification' in window && Notification.permission === 'granted') {
       try { new Notification('PinEase · 青松坐姿', { body: message, tag: 'pinease-' + kind, icon: new URL(import.meta.env.BASE_URL + 'icon.svg', window.location.href).href }) } catch { /* 页面提醒继续可用 */ }
     }
     if (kind === 'break' || kind === 'posture' && settings.value.focusReminder) {
@@ -546,6 +545,7 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   async function requestNotifications() {
+    if (desktopRuntime.value) return
     if (!('Notification' in window)) { announce('当前浏览器不支持通知', '页面内提醒仍然可用。'); return }
     const permission = await Notification.requestPermission()
     await updateSettings({ notificationsEnabled: permission === 'granted' })
