@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld('pineaseDesktop', Object.freeze({
   notificationAvailable() {
     return ipcRenderer.invoke('desktop:notification-available')
   },
+  setRestOverlay(active) {
+    return ipcRenderer.invoke('desktop:rest-overlay', Boolean(active))
+  },
   readyToQuit() {
     ipcRenderer.send('desktop:quit-ready')
   },

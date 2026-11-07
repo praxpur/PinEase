@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArrowDownToLine, ArrowUpRight, ChevronRight, Clock3, Leaf } from 'lucide-vue-next'
+import { ArrowDownToLine, ArrowUpRight, ChevronRight, Clock3, Leaf, Upload, ShieldCheck } from 'lucide-vue-next'
 import { useMonitorStore } from '@/stores/monitor'
-import { dailyStats, dateLabel, duration, localDay, shortTime } from '@/lib/format'
+import { aggregateOrgReports, computeHealthScore, dailyStats, dateLabel, demoOrgReports, duration, localDay, shortTime, type OrgReportPayload } from '@/lib/format'
 import { demoRecords } from '@/lib/demo'
 import type { SessionRecord } from '@/domain/types'
 import AppDialog from '@/components/ui/AppDialog.vue'
@@ -12,13 +12,20 @@ const days = ref<7 | 30>(7)
 const example = ref(false)
 const details = ref<SessionRecord | null>(null)
 const visibleCount = ref(30)
+const seatLabel = ref('自习座位-01')
+const orgReports = ref<OrgReportPayload[]>([])
+const orgDemo = ref(false)
+const orgInput = ref<HTMLInputElement | null>(null)
 const source = computed(() => example.value ? demoRecords() : store.realRecords)
 watch([days, example], () => { visibleCount.value = 30 })
 const stats = computed(() => dailyStats(source.value, days.value))
 const summary = computed(() => {
   const effective = stats.value.reduce((sum, s) => sum + s.effectiveSeconds, 0)
   const good = stats.value.reduce((sum, s) => sum + s.goodSeconds, 0)
-  return { effective, ratio: effective ? Math.round(good / effective * 100) : null, reminders: stats.value.reduce((sum, s) => sum + s.reminders, 0), activeDays: stats.value.filter((s) => s.effectiveSeconds > 0).length }
+  const bad = stats.value.reduce((sum, s) => sum + s.badSeconds, 0)
+  const reminders = stats.value.reduce((sum, s) => sum + s.reminders, 0)
+  const { score, grade } = computeHealthScore(good, bad, reminders)
+  return { effective, ratio: effective ? Math.round(good / effective * 100) : null, reminders, activeDays: stats.value.filter((s) => s.effectiveSeconds > 0).length, score, grade }
 })
 const filteredRecords = computed(() => {
   const first = stats.value[0]?.date ?? localDay()
@@ -27,6 +34,37 @@ const filteredRecords = computed(() => {
 })
 const visibleRecords = computed(() => filteredRecords.value.slice(0, visibleCount.value))
 const simulated = computed(() => example.value)
+const orgBoard = computed(() => aggregateOrgReports(orgReports.value))
+
+async function importOrgFiles(event: Event) {
+  const files = (event.target as HTMLInputElement).files
+  if (!files || !files.length) return
+  try {
+    const loaded: OrgReportPayload[] = []
+    for (const f of Array.from(files)) {
+      const parsed = JSON.parse(await f.text()) as OrgReportPayload
+      if (parsed && parsed.schema === 'pinease-org-v1') loaded.push(parsed)
+    }
+    if (!loaded.length) throw new Error('请选择通过 PinEase 导出的组织脱敏统计包。')
+    orgDemo.value = false
+    orgReports.value = loaded
+    store.announce('脱敏看板已生成', `成功汇总 ${loaded.length} 台终端的脱敏统计数据。`)
+  } catch (err) {
+    store.announce('未能汇总', err instanceof Error ? err.message : '文件格式不匹配。', 'error')
+  } finally {
+    if (orgInput.value) orgInput.value.value = ''
+  }
+}
+
+function loadDemoOrgBoard() {
+  if (orgDemo.value) {
+    orgDemo.value = false
+    orgReports.value = []
+    return
+  }
+  orgDemo.value = true
+  orgReports.value = demoOrgReports()
+}
 </script>
 
 <template>
@@ -41,6 +79,7 @@ const simulated = computed(() => example.value)
     </div>
     <div v-if="simulated" class="notice demo-notice">正在查看模拟数据，示例不会写入你的真实记录。</div>
     <section class="history-overview">
+      <div><span class="metric-label">周期健康评分</span><strong>{{ summary.score === null ? '—' : summary.score }}<small v-if="summary.grade"> · {{ summary.grade }}</small></strong></div>
       <div><span class="metric-label">有效监测</span><strong>{{ duration(summary.effective) }}</strong></div>
       <div><span class="metric-label">参考坐姿占比</span><strong>{{ summary.ratio === null ? '—' : summary.ratio + '%' }}</strong></div>
       <div><span class="metric-label">提醒次数</span><strong>{{ summary.reminders }}<small> 次</small></strong></div>
@@ -65,6 +104,45 @@ const simulated = computed(() => example.value)
       <button v-if="visibleCount < filteredRecords.length" class="button button-outline records-more" @click="visibleCount += 30">加载更多记录</button>
       <p class="records-footnote">占比由可靠识别的时长计算。未知、离座和暂停单列，避免把没有观察到的时间算成正常。</p>
     </section>
+
+    <section class="org-board-section">
+      <div class="section-title-row">
+        <div>
+          <h2><ShieldCheck :size="18" />自习室与机房脱敏健康看板</h2>
+          <p class="muted-text">标准化脱敏统计接口（pinease-org-v1）：仅汇总时长、占比与评分，绝不包含画面或个人身份。</p>
+        </div>
+        <button class="text-button" @click="loadDemoOrgBoard">{{ orgDemo ? '收起试点模拟看板' : '查看机房试点模拟看板' }}<ArrowUpRight :size="15" /></button>
+      </div>
+      <div class="org-actions-row">
+        <label class="org-seat-input">
+          <span>本机工位标识</span>
+          <input v-model="seatLabel" type="text" maxlength="24" placeholder="如：信院机房 A-01" />
+        </label>
+        <button class="button button-outline" @click="store.exportOrgReport(days, seatLabel)"><ArrowDownToLine :size="15" />导出本机脱敏包</button>
+        <button class="button button-outline" @click="orgInput?.click()"><Upload :size="15" />导入多终端脱敏包汇总</button>
+        <input ref="orgInput" class="sr-only" type="file" multiple accept=".json,application/json" @change="importOrgFiles" />
+      </div>
+      <div v-if="orgBoard.terminalCount > 0" class="org-summary-box">
+        <div v-if="orgDemo" class="notice demo-notice">当前展示校内机房 / 自习室 6 台试点终端的模拟脱敏聚合看板。</div>
+        <div class="history-overview org-overview">
+          <div><span class="metric-label">参与汇总终端</span><strong>{{ orgBoard.terminalCount }}<small> 台</small></strong></div>
+          <div><span class="metric-label">累计有效时长</span><strong>{{ duration(orgBoard.totalEffectiveSeconds) }}</strong></div>
+          <div><span class="metric-label">平均良好占比</span><strong>{{ orgBoard.averageGoodRatio === null ? '—' : orgBoard.averageGoodRatio + '%' }}</strong></div>
+          <div><span class="metric-label">团体健康均分</span><strong>{{ orgBoard.averageScore === null ? '—' : orgBoard.averageScore }}<small> 分</small></strong></div>
+        </div>
+        <div class="records-table org-table">
+          <div class="record-table-head"><span>工位 / 匿名终端</span><span>有效监测</span><span>良好占比</span><span>健康评分</span><span>提醒</span></div>
+          <div v-for="(seat, idx) in orgBoard.seats" :key="idx" class="record-row org-row">
+            <span><strong>{{ seat.seatLabel }}</strong></span>
+            <span>{{ duration(seat.effectiveSeconds) }}</span>
+            <span>{{ seat.goodRatio === null ? '—' : seat.goodRatio + '%' }}</span>
+            <span>{{ seat.score === null ? '—' : seat.score + ' 分' }}</span>
+            <span>{{ seat.reminders }} 次</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <AppDialog :open="!!details" title="这一段专注" description="记录仅包含状态和统计，不包含摄像头画面。" @update:open="details = null">
       <template v-if="details">
         <div class="detail-date"><Clock3 :size="16" />{{ new Date(details.startedAt).toLocaleString('zh-CN') }}</div>
@@ -75,4 +153,3 @@ const simulated = computed(() => example.value)
     </AppDialog>
   </div>
 </template>
-

@@ -10,6 +10,7 @@ declare global {
       setTheme: (theme: 'light' | 'dark') => void
       notify: (title: string, body: string) => Promise<boolean>
       notificationAvailable: () => Promise<boolean>
+      setRestOverlay?: (active: boolean) => Promise<boolean>
       readyToQuit: () => void
     }
   }

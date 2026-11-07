@@ -3,9 +3,10 @@ import { defineStore } from 'pinia'
 import { DEFAULT_SETTINGS, STATE_LABELS, type Calibration, type DemoPose, type Features, type HeadPose, type Landmark, type Phase, type PostureState, type ReminderKind, type SessionRecord, type Settings, type VisionFrame } from '@/domain/types'
 import { acceptFrameTimestamp, advancePostureHold, checkCalibrationCoverage, classify, makeCalibration, normalCoverage, observe, resumePostureHold, smoothFeatures, POSTURE_FEATURE_VERSION, type PostureVerdict } from '@/domain/posture'
 import * as storage from '@/lib/storage'
-import { dailyStats, downloadFile, localDay } from '@/lib/format'
+import { buildOrgSummary, computeHealthScore, dailyStats, downloadFile, duration, localDay } from '@/lib/format'
 import { DEMO_FEATURES, demoCalibration } from '@/lib/demo'
 import { calibrateHeadPose } from '@/lib/head-pose'
+import { checkNeckExerciseMatch, summarizePerformance, type LightingReport, type NeckExerciseStep } from '@/lib/lighting'
 import { BlinkTracker } from '@/domain/blink'
 import { detectInversion, ALIEN_MESSAGE, InversionTracker } from '@/domain/fun'
 import { playReminder } from '@/lib/audio'
@@ -64,6 +65,16 @@ export const useMonitorStore = defineStore('monitor', () => {
   const restRemaining = ref(0)
   const restKind = ref<ReminderKind>('break')
   const desktopRuntime = ref(window.pineaseDesktop?.isDesktop === true)
+  const eyeCareActive = ref(false)
+  const lighting = ref<LightingReport>({ luma: 128, centerLuma: 128, edgeLuma: 128, contrast: 32, status: 'normal', gamma: 1, boostApplied: false })
+  const latencyWindow = ref<number[]>([])
+  const frameTimeWindow = ref<number[]>([])
+  const performanceStats = computed(() => summarizePerformance(latencyWindow.value, frameTimeWindow.value))
+  const evalMetrics = ref({ totalFrames: 0, validFrames: 0, darkFrames: 0, backlitFrames: 0, candidateTransitions: 0, confirmedTransitions: 0 })
+  const exerciseActive = ref(false)
+  const exerciseStep = ref<NeckExerciseStep>('left')
+  const exerciseProgress = ref(0)
+  let performanceWarned = false
   let cameraPreview: HTMLVideoElement | null = null
 
   let camera: VisionCamera | null = null
@@ -113,6 +124,38 @@ export const useMonitorStore = defineStore('monitor', () => {
     if (state.value === 'candidate_bad') return 'soft'
     return 'muted'
   })
+
+  function toggleEyeCare(force?: boolean) {
+    eyeCareActive.value = typeof force === 'boolean' ? force : !eyeCareActive.value
+    try {
+      document?.documentElement?.classList?.toggle('eye-care-mode', eyeCareActive.value)
+    } catch { /* test env safe */ }
+  }
+
+  function startNeckExercise() {
+    exerciseActive.value = true
+    exerciseStep.value = 'left'
+    exerciseProgress.value = 0
+  }
+
+  function advanceNeckExercise(matched: boolean, dtSeconds: number) {
+    if (!exerciseActive.value || exerciseStep.value === 'done') return
+    const rate = matched ? 55 : demo.value || !running.value ? 35 : 18
+    exerciseProgress.value = Math.min(100, exerciseProgress.value + rate * dtSeconds)
+    if (exerciseProgress.value >= 100) {
+      if (exerciseStep.value === 'left') {
+        exerciseStep.value = 'right'
+        exerciseProgress.value = 0
+      } else if (exerciseStep.value === 'right') {
+        exerciseStep.value = 'up'
+        exerciseProgress.value = 0
+      } else if (exerciseStep.value === 'up') {
+        exerciseStep.value = 'done'
+        exerciseProgress.value = 100
+        announce('颈部舒展完成', '肩膀放松，继续保持舒适的节奏。')
+      }
+    }
+  }
 
   function announce(title: string, message = '', kind: 'info' | 'reminder' | 'error' = 'info') {
     toast.value = { title, message, kind }
@@ -181,6 +224,10 @@ export const useMonitorStore = defineStore('monitor', () => {
     blinkRate.value = null
     quality.value = 0
     landmarks.value = []
+    latencyWindow.value = []
+    frameTimeWindow.value = []
+    lighting.value = { luma: 128, centerLuma: 128, edgeLuma: 128, contrast: 32, status: 'normal', gamma: 1, boostApplied: false }
+    performanceWarned = false
   }
 
   function createSession(mode: 'real' | 'demo') {
@@ -190,6 +237,7 @@ export const useMonitorStore = defineStore('monitor', () => {
       goodSeconds: 0, badSeconds: 0, unknownSeconds: 0, absentSeconds: 0, pausedSeconds: 0,
       reminders: [], segments: [],
     }
+    evalMetrics.value = { totalFrames: 0, validFrames: 0, darkFrames: 0, backlitFrames: 0, candidateTransitions: 0, confirmedTransitions: 0 }
     continuousSeconds.value = 0
     nextBreak = settings.value.sitMinutes * 60
     lastReminder.posture = lastReminder.break = lastReminder.eyes = -Infinity
@@ -254,6 +302,10 @@ export const useMonitorStore = defineStore('monitor', () => {
       nextBreak = continuousSeconds.value + settings.value.sitMinutes * 60
     }
     if (restOpen.value) {
+      if (exerciseActive.value && exerciseStep.value !== 'done') {
+        const matched = checkNeckExerciseMatch(exerciseStep.value, headPoseDelta.value, feature.value, profile.value?.baseline ?? null, landmarks.value)
+        advanceNeckExercise(matched, dt)
+      }
       restRemaining.value = Math.max(0, Math.ceil((restEnd - now) / 1000))
       if (restRemaining.value === 0) closeRest()
     }
@@ -275,10 +327,12 @@ export const useMonitorStore = defineStore('monitor', () => {
       if (generation !== token) return
       error.value = message
       void endSession()
-    }, () => cameraPreview))
+    }, () => cameraPreview, (report) => {
+      lighting.value = report
+    }))
     camera = active
     try {
-      const result = await active.open(settings.value.cameraId, settings.value.cameraFacingMode, settings.value.blinkEnabled, settings.value.fps, settings.value.modelPreference, settings.value.headPoseEnabled)
+      const result = await active.open(settings.value.cameraId, settings.value.cameraFacingMode, settings.value.blinkEnabled, settings.value.fps, settings.value.modelPreference, settings.value.headPoseEnabled, settings.value.lowLightBoost)
       if (generation !== token) { active.close(); return }
       cameraId.value = result.cameraId
       stream.value = active.stream ? markRaw(active.stream) : null
@@ -341,6 +395,7 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   function updatePosture(f: Features, reference: Calibration, now: number, channelQuality?: import('@/domain/types').Observation['channelQuality']) {
+    const previousState = state.value
     if (badGapStarted !== null) {
       badSince = resumePostureHold(badSince, badGapStarted, now)
       if (badSince === null) { badReason = null; badConfirmedBeforeGap = false }
@@ -367,6 +422,8 @@ export const useMonitorStore = defineStore('monitor', () => {
       badSince = hold.since
       badConfirmedBeforeGap = false
       state.value = hold.confirmed ? 'bad' : 'candidate_bad'
+      if (previousState !== 'candidate_bad' && state.value === 'candidate_bad') evalMetrics.value.candidateTransitions++
+      if (previousState !== 'bad' && state.value === 'bad') evalMetrics.value.confirmedTransitions++
       reason.value = verdict.reason
     } else {
       badSince = null
@@ -386,6 +443,9 @@ export const useMonitorStore = defineStore('monitor', () => {
   function handleObservation(points: Landmark[], now: number, width: number, height: number) {
     const result = observe(points, width, height, settings.value.view, phase.value === 'calibrating' ? undefined : profile.value?.side)
     quality.value = result.quality
+    evalMetrics.value.totalFrames++
+    if (lighting.value.status === 'dark') evalMetrics.value.darkFrames++
+    if (lighting.value.status === 'backlit') evalMetrics.value.backlitFrames++
     if (!result.valid || !result.features) {
       feature.value = null
       channels.value = null
@@ -404,6 +464,7 @@ export const useMonitorStore = defineStore('monitor', () => {
       if (restOpen.value && restKind.value === 'posture') closeRest()
       return
     }
+    evalMetrics.value.validFrames++
     absentSince = null
     if (phase.value === 'calibrating') {
       channels.value = null
@@ -438,6 +499,12 @@ export const useMonitorStore = defineStore('monitor', () => {
       announce('需要重新校准', '摄像头方向或画面比例已变化，请重新校准后继续监测。')
     }
     inferenceMs.value = frame.inferenceMs
+    latencyWindow.value = [...latencyWindow.value.slice(-29), frame.inferenceMs]
+    frameTimeWindow.value = [...frameTimeWindow.value.slice(-29), frame.timestamp]
+    if (!performanceWarned && poseModel.value === 'full' && performanceStats.value.degraded) {
+      performanceWarned = true
+      announce('推理耗时偏高', '当前设备运行 Full 模型较慢，可在设置中切换为「节能 · Lite」以降低功耗。')
+    }
     handleObservation(frame.landmarks, frame.timestamp, frame.width, frame.height)
     headPose.value = settings.value.headPoseEnabled ? frame.headPose ?? null : null
     if (phase.value === 'calibrating' && quality.value >= 0.55 && headPose.value) faceCalibrationSamples.push(headPose.value)
@@ -463,7 +530,14 @@ export const useMonitorStore = defineStore('monitor', () => {
     blinkFaceMissing = score === null
     blinkTracker.update(score, now)
     const result = showBlink(now, score === null)
-    if (result.seconds >= 30 && result.rate !== null && result.rate < 8) remind('eyes', '看看远处，放松一下眼睛')
+    if (result.seconds >= 30 && result.rate !== null && result.rate < 8) {
+      if (settings.value.eyeCareAuto && !eyeCareActive.value) {
+        toggleEyeCare(true)
+        remind('eyes', '近期眨眼偏少，已为你自动开启柔和护眼模式')
+      } else {
+        remind('eyes', '看看远处，放松一下眼睛')
+      }
+    }
   }
 
   function beginCalibration() {
@@ -509,8 +583,8 @@ export const useMonitorStore = defineStore('monitor', () => {
       const coverage = []
       if (settings.value.headPoseEnabled && !result.faceBaseline) coverage.push('人脸参考不足，头姿实验功能暂不可用')
       if (result.baseline.headPitch == null) coverage.push('鼻耳位置未持续清晰，头部俯仰参考未启用')
-      if (result.baseline.torsoHeight == null) coverage.push('髋部参考不足，含胸与上身下沉检测未启用')
-      announce('校准完成', coverage.length ? coverage.join('；') + '。其余检测继续工作。' : '已建立头部俯仰与躯干高度参考。换机位后请重新校准。')
+      if (result.view === 'side' && result.baseline.torsoHeight == null && result.baseline.torso == null) coverage.push('髋部参考不足，含胸与上身下沉检测未启用')
+      announce('校准完成', coverage.length ? coverage.join('；') + '。其余检测继续工作。' : result.baseline.torsoHeight != null ? '已建立头部俯仰与躯干高度参考。换机位后请重新校准。' : '已建立头肩坐姿参考。换机位后请重新校准。')
     } catch (failure) {
       phase.value = 'ready'
       state.value = 'need_cal'
@@ -533,7 +607,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     calibrationBuffer = []
     calibrationTimestamps = []
     resetDynamics()
-    restOpen.value = false
+    closeRest()
     void persist()
   }
 
@@ -556,7 +630,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     stream.value = null
     phase.value = 'idle'
     state.value = 'need_cal'
-    restOpen.value = false
+    closeRest()
     if (timer !== null) clearInterval(timer)
     if (saveTimer !== null) clearInterval(saveTimer)
     timer = saveTimer = null
@@ -606,16 +680,32 @@ export const useMonitorStore = defineStore('monitor', () => {
       restRemaining.value = settings.value.restSeconds
       restEnd = now + settings.value.restSeconds * 1000
       restOpen.value = true
+      exerciseActive.value = false
+      exerciseStep.value = 'left'
+      exerciseProgress.value = 0
+      if (desktopRuntime.value && settings.value.focusReminder) {
+        void window.pineaseDesktop?.setRestOverlay?.(true)
+      }
     }
     void persist()
   }
 
   function closeRest() {
-    if (restKind.value === 'break') {
+    if (restOpen.value && restKind.value === 'break') {
       continuousSeconds.value = 0
       nextBreak = settings.value.sitMinutes * 60
     }
+    const wasOpen = restOpen.value
     restOpen.value = false
+    exerciseActive.value = false
+    if (wasOpen) {
+      if (desktopRuntime.value) void window.pineaseDesktop?.setRestOverlay?.(false)
+      try {
+        if (document?.fullscreenElement && typeof document.exitFullscreen === 'function') {
+          void document.exitFullscreen().catch(() => {})
+        }
+      } catch { /* ignore */ }
+    }
   }
 
   async function testDesktopNotification() {
@@ -628,6 +718,7 @@ export const useMonitorStore = defineStore('monitor', () => {
 
   async function updateSettings(partial: Partial<Settings>): Promise<boolean> {
     const next = storage.sanitizeSettings({ ...settings.value, ...partial })
+    if (camera) camera.lowLightBoost = next.lowLightBoost
     const needsRestart = next.view !== settings.value.view || next.cameraId !== settings.value.cameraId || next.cameraFacingMode !== settings.value.cameraFacingMode || next.blinkEnabled !== settings.value.blinkEnabled || next.headPoseEnabled !== settings.value.headPoseEnabled || next.modelPreference !== settings.value.modelPreference || next.fps !== settings.value.fps
     if (needsRestart && (running.value || phase.value === 'paused' || busy.value)) await endSession()
     const breakChanged = next.sitMinutes !== settings.value.sitMinutes || next.breakEnabled !== settings.value.breakEnabled
@@ -667,9 +758,63 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   function exportCSV(days: 7 | 30 = 30) {
-    const rows = ['日期,正常秒数,偏离秒数,未知秒数,有效秒数,良好占比,提醒次数']
-    for (const d of dailyStats(realRecords.value, days)) rows.push([d.date, Math.round(d.goodSeconds), Math.round(d.badSeconds), Math.round(d.unknownSeconds), Math.round(d.effectiveSeconds), d.ratio === null ? '' : Math.round(d.ratio * 100) + '%', d.reminders].join(','))
+    const rows = ['日期,正常秒数,偏离秒数,未知秒数,有效秒数,良好占比,提醒次数,健康评分']
+    for (const d of dailyStats(realRecords.value, days)) rows.push([d.date, Math.round(d.goodSeconds), Math.round(d.badSeconds), Math.round(d.unknownSeconds), Math.round(d.effectiveSeconds), d.ratio === null ? '' : Math.round(d.ratio * 100) + '%', d.reminders, d.score ?? ''].join(','))
     downloadFile('PinEase-summary-' + days + 'd-' + localDay() + '.csv', '\uFEFF' + rows.join('\r\n'), 'text/csv;charset=utf-8')
+  }
+
+  function exportOrgReport(days: 7 | 30 = 7, seatLabel = '自习座位-01') {
+    const payload = buildOrgSummary(realRecords.value, days, seatLabel)
+    downloadFile(`PinEase-org-seat-${localDay()}.json`, JSON.stringify(payload, null, 2))
+    announce('脱敏统计包已导出', '仅包含聚合时长与评分，不含摄像头画面或个人隐私标识。')
+  }
+
+  function exportEvaluationReport() {
+    const all = realRecords.value
+    const totalGood = all.reduce((sum, s) => sum + s.goodSeconds, 0)
+    const totalBad = all.reduce((sum, s) => sum + s.badSeconds, 0)
+    const totalCandidate = all.reduce((sum, s) => sum + (s.candidateSeconds ?? 0), 0)
+    const totalUnknown = all.reduce((sum, s) => sum + s.unknownSeconds, 0)
+    const totalEffective = totalGood + totalBad
+    const totalReminders = all.reduce((sum, s) => sum + s.reminders.length, 0)
+    const { score } = computeHealthScore(totalGood, totalBad, totalReminders)
+    const perf = performanceStats.value
+    const m = evalMetrics.value
+    const validFrameRatio = m.totalFrames > 0 ? Math.round((m.validFrames / m.totalFrames) * 100) + '%' : '待实测采集'
+    const debounceFilterRate = m.candidateTransitions > 0
+      ? Math.max(0, Math.round(((m.candidateTransitions - m.confirmedTransitions) / m.candidateTransitions) * 100)) + '%'
+      : '—'
+    const md = [
+      '# 青松坐姿（PinEase）设备端推理视觉姿态识别系统评测记录',
+      '',
+      `- 生成时间：${new Date().toLocaleString('zh-CN')}`,
+      `- 运行环境：${desktopRuntime.value ? 'Windows Electron 桌面端' : 'Web 浏览器端'}`,
+      `- 识别引擎与模型：${engine.value || settings.value.modelPreference}（设定帧率 ${settings.value.fps} FPS，机位：${settings.value.view === 'front' ? '正面' : '侧面'}）`,
+      `- 暗光/逆光自适应补偿：${settings.value.lowLightBoost ? '已开启' : '未开启'}（当前环境亮度 Luma=${lighting.value.luma}，状态：${lighting.value.status}）`,
+      '',
+      '## 一、推理性能与功耗平衡指标',
+      `- 采样帧数：${perf.samples} 帧（本次运行累计 ${m.totalFrames} 帧）`,
+      `- 单帧推理耗时中位数（p50）：${perf.p50Ms} ms`,
+      `- 单帧推理耗时 95 分位（p95）：${perf.p95Ms} ms`,
+      `- 单帧平均推理耗时：${perf.avgMs} ms`,
+      `- 实际有效吞吐帧率：${perf.estimatedFps || settings.value.fps} FPS`,
+      '',
+      '## 二、关键点鲁棒性与时间窗口防抖（Debouncing）评估',
+      `- 关键点有效检出率：${validFrameRatio}（有效帧 ${m.validFrames} / 总帧数 ${m.totalFrames}）`,
+      `- 暗光/逆光帧占比：暗光 ${m.darkFrames} 帧，逆光 ${m.backlitFrames} 帧`,
+      `- 候选姿态变化触发次数：${m.candidateTransitions} 次`,
+      `- 持续超阈值确认偏离次数：${m.confirmedTransitions} 次（保持阈值 ${settings.value.holdSeconds} 秒）`,
+      `- 短时动作防抖过滤率：${debounceFilterRate}`,
+      '',
+      '## 三、累计有效监测与健康评分统计',
+      `- 真实监测会话总数：${all.length} 段`,
+      `- 累计有效在座时长：${duration(totalEffective)}（正常 ${duration(totalGood)} / 偏离 ${duration(totalBad)}）`,
+      `- 累计候选微调时长（未触发误报）：${duration(totalCandidate)}`,
+      `- 累计未知/遮挡剥离时长：${duration(totalUnknown)}`,
+      `- 综合坐姿健康评分：${score === null ? '暂无' : score + ' / 100 分'}`,
+    ].join('\r\n')
+    downloadFile(`PinEase-评测报告-${localDay()}.md`, md, 'text/markdown;charset=utf-8')
+    announce('评测报告已导出', '已生成 Markdown 格式的推理性能与防抖鲁棒性评测报告。')
   }
 
   async function importBackup(text: string) {
@@ -727,8 +872,9 @@ export const useMonitorStore = defineStore('monitor', () => {
     demo, demoPose, stream, landmarks, frameWidth, frameHeight, quality, inferenceMs, engine, poseModel, devices,
     calibrationProgress, calibrationSamples, feature, channels, deviation, session, today, elapsed, profile,
     continuousSeconds, headPoseAvailable, headPose, headPoseDelta, blinkRate, blinkAvailable, blinkCount, blinkObservedSeconds, blinkStatus, toast, restOpen, restRemaining, restKind, stateLabel, stateColor,
+    eyeCareActive, lighting, performanceStats, evalMetrics, exerciseActive, exerciseStep, exerciseProgress,
     init, startCamera, startDemo, beginCalibration, pause, resume, endSession, updateSettings, refreshDevices,
-    requestNotifications, testDesktopNotification, resetProfiles, exportBackup, exportCSV, importBackup, deleteHistory, dismissToast,
-    closeRest, announce, previewSound, funMoment, dismissFun, bindCameraPreview, updateVideoSize, handleDesktopCommand,
+    requestNotifications, testDesktopNotification, resetProfiles, exportBackup, exportCSV, exportOrgReport, exportEvaluationReport, importBackup, deleteHistory, dismissToast,
+    closeRest, announce, previewSound, funMoment, dismissFun, bindCameraPreview, updateVideoSize, handleDesktopCommand, toggleEyeCare, startNeckExercise,
   }
 })

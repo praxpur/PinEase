@@ -47,6 +47,8 @@ export interface Settings {
   notificationsEnabled: boolean
   focusReminder: boolean
   blinkEnabled: boolean
+  eyeCareAuto: boolean
+  lowLightBoost: boolean
   fps: number
 }
 
@@ -130,6 +132,8 @@ export interface DailyStats {
   reminders: number
   sessions: number
   ratio: number | null
+  score?: number | null
+  grade?: string | null
 }
 
 export interface VisionFrame {
@@ -173,6 +177,8 @@ export const DEFAULT_SETTINGS: Settings = {
   notificationsEnabled: false,
   focusReminder: false,
   blinkEnabled: false,
+  eyeCareAuto: true,
+  lowLightBoost: true,
   fps: 12,
 }
 

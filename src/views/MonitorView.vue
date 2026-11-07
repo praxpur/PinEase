@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { ArrowUpRight, ArrowRight, Play, Pause, Square, ScanLine, Check, ShieldCheck, ChevronRight, CircleHelp, Leaf, Timer, Eye } from 'lucide-vue-next'
+import { ArrowUpRight, ArrowRight, Play, Pause, ScanLine, Check, ShieldCheck, ChevronRight, CircleHelp, Leaf, Timer, Eye } from 'lucide-vue-next'
 import { useMonitorStore } from '@/stores/monitor'
 import { clock, duration } from '@/lib/format'
 import CameraPreview from '@/components/CameraPreview.vue'
@@ -15,8 +15,18 @@ const postureCoverage = computed(() => {
   const baseline = store.profile?.baseline
   if (!baseline) return ''
   const head = baseline.headPitch == null ? '鼻耳参考不足，俯仰未启用' : store.feature?.headPitch == null ? '头部俯仰暂不可用' : '抬头 / 低头'
+  if (store.profile?.view === 'front' && baseline.torsoHeight == null) {
+    const upper = baseline.neckHeight == null ? '双肩倾角 · 屏幕距离' : '头颈下沉 · 双肩倾角'
+    return head + ' · ' + upper
+  }
   const torso = baseline.torsoHeight == null ? '髋部参考不足，躯干未启用' : store.feature?.torsoHeight == null ? '髋部未看清，躯干暂不判断' : '含胸 / 上身下沉'
   return head + ' · ' + torso
+})
+const lightingDescription = computed(() => {
+  const l = store.lighting
+  if (l.status === 'dark') return l.boostApplied ? `环境偏暗（亮度 ${l.luma}）· 已启用暗光提亮补偿` : `环境偏暗（亮度 ${l.luma}）· 建议补充桌面照明`
+  if (l.status === 'backlit') return l.boostApplied ? `检测到逆光（中心 ${l.centerLuma} / 背景 ${l.edgeLuma}）· 已增强暗部` : `检测到逆光 · 建议避开背后强光`
+  return `光线良好（亮度 ${l.luma}）`
 })
 const channelLabels = {
   headPitch: '头部俯仰', neckHeight: '头颈高度', torsoHeight: '躯干高度',
@@ -25,7 +35,9 @@ const channelLabels = {
 } as const
 const channelStatus = { normal: '未见偏离', bad: '偏离参考', unknown: '暂不可判断', disabled: '未启用' } as const
 const channelDetails = computed(() => store.channels
-  ? Object.entries(store.channels).map(([key, result]) => ({ label: channelLabels[key as keyof typeof channelLabels], status: result.status, text: channelStatus[result.status], score: result.landmarkScore }))
+  ? Object.entries(store.channels)
+    .filter(([key, result]) => !(store.profile?.view === 'front' && ['torsoHeight', 'neckAngle', 'torsoAngle'].includes(key) && result.status === 'disabled'))
+    .map(([key, result]) => ({ label: channelLabels[key as keyof typeof channelLabels], status: result.status, text: channelStatus[result.status], score: result.landmarkScore }))
   : [])
 async function primary() {
   if (store.phase === 'paused') await store.resume()
@@ -38,7 +50,7 @@ const statusDescription = computed(() => {
   if (store.phase === 'loading') return '首次准备可能需要一点时间。你的画面始终留在这台设备上。'
   if (store.phase === 'calibrating') return store.settings.view === 'side'
     ? '保持舒适坐姿，让同一侧鼻子、耳朵与肩膀清晰入镜；露出髋部可增加躯干检测。'
-    : '保持舒适坐姿，鼻子、双耳与双肩尽量清晰稳定；露出髋部可增加躯干检测。'
+    : '保持舒适坐姿，让鼻子、双耳与双肩尽量清晰稳定。'
   if (store.phase === 'paused') return '摄像头已关闭。准备好了，再继续刚才的专注。'
   if (store.demo) return '这是模拟的监测过程，不会打开摄像头，也不会写入真实历史。'
   return store.reason
@@ -85,9 +97,10 @@ const statusDescription = computed(() => {
           <p>角度方向及效果待真人验证，不触发提醒。</p>
         </div>
         <div v-if="store.phase === 'calibrating'" class="sample-note">已收集 {{ store.calibrationSamples }} 个有效样本</div>
-        <div v-else-if="store.phase === 'ready'" class="setup-note"><span>01</span><p>{{ store.settings.view === 'front' ? '让鼻子、双耳与双肩进入画面，舒适地坐好。' : '让摄像头看清同一侧的鼻子、耳朵与肩膀。' }}要检测含胸和上身下沉，请同时露出髋部；半身画面仍可监测头颈。</p></div>
+        <div v-else-if="store.phase === 'ready'" class="setup-note"><span>01</span><p>{{ store.settings.view === 'front' ? '让鼻子、双耳与双肩进入画面，舒适地坐好即可开始校准。' : '让摄像头看清同一侧的鼻子、耳朵与肩膀；露出髋部可增加躯干检测。' }}</p></div>
         <div v-else-if="store.running && !store.demo" class="signal-line"><span class="status-dot" :class="store.quality >= 0.55 ? 'on' : ''" />{{ store.quality >= 0.55 ? '关键点清晰' : '等待清晰画面' }}<span>{{ store.settings.view === 'front' ? '正面参考' : '侧面参考' }}</span></div>
-        <p v-if="store.phase === 'monitoring' && !store.demo" class="sample-note">识别模型：{{ store.engine }}</p>
+        <p v-if="store.phase === 'monitoring' && !store.demo" class="sample-note">识别模型：{{ store.engine }}<template v-if="store.performanceStats.samples"> · 推理 p50 {{ store.performanceStats.p50Ms }}ms / p95 {{ store.performanceStats.p95Ms }}ms</template></p>
+        <p v-if="store.running && !store.demo" class="sample-note">{{ lightingDescription }}</p>
         <p v-if="store.phase === 'monitoring' && !store.demo" class="sample-note">{{ postureCoverage }}</p>
         <details v-if="store.phase === 'monitoring' && !store.demo && channelDetails.length" class="channel-details">
           <summary>查看各项检测</summary>
@@ -107,6 +120,7 @@ const statusDescription = computed(() => {
     <section class="today-section">
       <div class="section-title-row"><h2>今天，一点点积累</h2><RouterLink to="/history" class="text-link">查看历史<ArrowUpRight :size="15" /></RouterLink></div>
       <div class="today-metrics">
+        <div><span class="metric-label">今日健康评分</span><strong>{{ store.today.score == null ? '—' : store.today.score }}<small v-if="store.today.grade"> · {{ store.today.grade }}</small></strong><p>结合参考坐姿占比与提醒频率计算</p></div>
         <div><span class="metric-label">有效监测</span><strong>{{ duration(store.today.effectiveSeconds) }}</strong><p>清晰识别下的在座记录</p></div>
         <div><span class="metric-label">参考坐姿占比</span><strong>{{ store.today.ratio === null ? '—' : Math.round(store.today.ratio * 100) + '%' }}</strong><p>正常时长 / 有效监测时长</p></div>
         <div><span class="metric-label">轻提醒</span><strong>{{ store.today.reminders }}<small> 次</small></strong><p>姿态、休息与护眼提醒</p></div>

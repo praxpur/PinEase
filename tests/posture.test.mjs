@@ -52,7 +52,9 @@ test('normal status describes only the posture channels actually covered', () =>
   assert.equal(hiddenHip.bad, false)
   assert.match(normalCoverage(hiddenHip.channels), /躯干暂不可判断/)
   const noHipReference = classify({ ...baseline, torsoHeight: null }, { ...profile, baseline: { ...baseline, torsoHeight: null } }, settings)
-  assert.match(normalCoverage(noHipReference.channels), /躯干检测未启用/)
+  assert.match(normalCoverage(noHipReference.channels), /头部俯仰与双肩范围未见持续偏离/)
+  const sideNoHip = classify({ ...baseline, torsoHeight: null }, { view: 'side', baseline: { ...baseline, torsoHeight: null } }, settings)
+  assert.match(normalCoverage(sideNoHip.channels), /躯干检测未启用/)
 })
 
 test('switching posture reason starts a fresh hold instead of borrowing the previous one', () => {

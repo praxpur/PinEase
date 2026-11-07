@@ -150,6 +150,19 @@ app.whenReady().then(async () => {
     if (event.sender !== windowRef?.webContents || !Object.hasOwn(titleBarColors, theme)) return
     windowRef.setTitleBarOverlay(titleBarColors[theme])
   })
+  ipcMain.handle('desktop:rest-overlay', (event, active) => {
+    if (!trustedRenderer(event) || !windowRef || windowRef.isDestroyed()) return false
+    const on = Boolean(active)
+    if (on) {
+      showWindow()
+      windowRef.setAlwaysOnTop(true, 'screen-saver')
+      windowRef.setFullScreen(true)
+    } else {
+      windowRef.setFullScreen(false)
+      windowRef.setAlwaysOnTop(false)
+    }
+    return true
+  })
   ipcMain.handle('desktop:notification-available', (event) => trustedRenderer(event) && Notification.isSupported())
   ipcMain.handle('desktop:notify', (event, title, body) => {
     if (!trustedRenderer(event) || !Notification.isSupported()) return false

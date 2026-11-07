@@ -69,6 +69,7 @@ async function testDesktopNotification() {
           <div class="setting-row"><div><label for="pose-model">姿态模型</label><p>切换模型会结束本次监测；新模型需要重新校准</p></div><select id="pose-model" :value="store.settings.modelPreference" :disabled="store.busy" @change="selected('modelPreference', $event)"><option value="auto">自动 · 优先 Full</option><option value="full">精细 · Full</option><option value="lite">节能 · Lite</option></select></div>
           <div class="setting-row"><div><strong>人脸头姿参考（实验）</strong><p>显示相对校准的角度变化；需清晰人脸，不用于姿态提醒。切换会结束监测。</p></div><AppSwitch :model-value="store.settings.headPoseEnabled" label="人脸头姿参考（实验）" :disabled="store.busy" @update:model-value="store.updateSettings({ headPoseEnabled: $event })" /></div>
           <div class="setting-row"><div><label for="fps">运行节奏</label><p>设备发热或卡顿时可以选择节能；切换会结束当前监测</p></div><select id="fps" :value="store.settings.fps" @change="number('fps', $event)"><option :value="7">节能</option><option :value="12">平衡</option><option :value="20">顺畅</option></select></div>
+          <div class="setting-row"><div><strong>暗光与逆光自适应补偿</strong><p>环境偏暗或背后逆光时，自动增强画面暗部以提高关键点稳定性</p></div><AppSwitch :model-value="store.settings.lowLightBoost" label="暗光与逆光自适应补偿" @update:model-value="store.updateSettings({ lowLightBoost: $event })" /></div>
           <div class="setting-row"><div><strong>显示摄像头画面</strong><p>关闭预览仍会继续监测</p></div><AppSwitch :model-value="store.settings.showPreview" label="显示摄像头画面" @update:model-value="store.updateSettings({ showPreview: $event })" /></div>
           <div class="setting-row"><div><strong>显示关键点连线</strong><p>方便确认头部与肩膀是否在画面内</p></div><AppSwitch :model-value="store.settings.showSkeleton" label="显示关键点连线" @update:model-value="store.updateSettings({ showSkeleton: $event })" /></div>
           <button class="setting-link" @click="confirm = 'calibration'"><ScanLine :size="16" />清除参考坐姿<span>{{ store.profiles.length }} 组</span><ChevronRight :size="15" /></button>
@@ -85,7 +86,7 @@ async function testDesktopNotification() {
           <div class="setting-row"><div><strong>试听提示音</strong><p>按当前音量和次数试听，不改变声音开关</p></div><button class="small-button" @click="store.previewSound">试听</button></div>
           <div v-if="!store.desktopRuntime" class="setting-row"><div><strong>浏览器通知</strong><p>{{ notificationSupported ? store.settings.notificationsEnabled ? '浏览器通知已开启' : '由你决定是否允许通知' : '此浏览器使用页面内提醒' }}</p></div><button class="small-button" :disabled="!notificationSupported" @click="store.settings.notificationsEnabled ? store.updateSettings({ notificationsEnabled: false }) : store.requestNotifications()">{{ store.settings.notificationsEnabled ? '关闭通知' : '允许通知' }}</button></div>
           <div v-if="store.desktopRuntime" class="setting-row"><div><strong>桌面通知</strong><p>缩小到托盘后也可收到；可先发送测试通知</p></div><button class="small-button" @click="testDesktopNotification">测试通知</button></div>
-          <div class="setting-row"><div><strong>更明显的页面提示</strong><p>持续偏离时淡入休息画面，随时可以退出</p></div><AppSwitch :model-value="store.settings.focusReminder" label="更明显的页面提示" @update:model-value="store.updateSettings({ focusReminder: $event })" /></div>
+          <div class="setting-row"><div><strong>全屏休息引导（坐直自动恢复）</strong><p>持续偏离时唤起休息画面（桌面版自动置顶全屏），坐姿恢复后自动退去</p></div><AppSwitch :model-value="store.settings.focusReminder" label="全屏休息引导（坐直自动恢复）" @update:model-value="store.updateSettings({ focusReminder: $event })" /></div>
         </section>
 
         <section id="settings-rest" class="settings-panel">
@@ -94,13 +95,20 @@ async function testDesktopNotification() {
           <div class="setting-row"><div><label for="sit">专注一段时间后休息</label><p>暂停和看不清的时段不会累加</p></div><div class="number-control"><input id="sit" type="number" min="10" max="120" step="5" :disabled="!store.settings.breakEnabled" :value="store.settings.sitMinutes" @change="number('sitMinutes', $event)" /><span>分钟</span></div></div>
           <div class="setting-row"><div><label for="rest">休息倒计时</label><p>你可以提前返回监测</p></div><div class="number-control"><input id="rest" type="number" min="20" max="300" step="10" :value="store.settings.restSeconds" @change="number('restSeconds', $event)" /><span>秒</span></div></div>
           <div class="setting-row"><div><strong>眨眼参考与护眼提醒</strong><p>需正面看清双眼；侧面可能不可用。切换会结束当前监测</p></div><AppSwitch :model-value="store.settings.blinkEnabled" label="眨眼参考与护眼提醒" @update:model-value="store.updateSettings({ blinkEnabled: $event })" /></div>
+          <div class="setting-row"><div><strong>眨眼偏少自动开启护眼暖光</strong><p>检测到眨眼频率过低时，自动开启柔和暖色滤镜减轻视觉疲劳</p></div><AppSwitch :model-value="store.settings.eyeCareAuto" label="眨眼偏少自动开启护眼暖光" @update:model-value="store.updateSettings({ eyeCareAuto: $event })" /></div>
+          <div class="setting-row"><div><strong>柔和护眼暖光滤镜</strong><p>当前状态：{{ store.eyeCareActive ? '已开启暖光保护' : '未开启' }}</p></div><button class="small-button" @click="store.toggleEyeCare()">{{ store.eyeCareActive ? '关闭护眼暖光' : '立即开启护眼' }}</button></div>
           <p v-if="store.settings.blinkEnabled" class="blink-diagnostics" role="status">{{ store.blinkAvailable ? store.phase === 'monitoring' ? store.blinkStatus : '开始监测并完成校准后统计' : '人脸模型将在开始真实监测时加载' }}<br />已识别 {{ store.blinkCount }} 次 · 最近一分钟有效观察 {{ store.blinkObservedSeconds }} 秒</p>
         </section>
 
         <section id="settings-data" class="settings-panel">
           <h2><ShieldCheck :size="18" />记录属于你</h2>
           <p class="privacy-copy">摄像头画面与逐帧关键点不保存、不上传。这里只保留参考参数、监测状态区间与提醒记录。</p>
-          <div class="backup-actions"><button class="button button-outline" @click="store.exportBackup"><Download :size="16" />导出备份</button><button class="button button-outline" :disabled="importing" @click="file?.click()"><Upload :size="16" />{{ importing ? '导入中…' : '导入备份' }}</button><input ref="file" class="sr-only" type="file" accept=".json,application/json" @change="importFile" /></div>
+          <div class="backup-actions">
+            <button class="button button-outline" @click="store.exportBackup"><Download :size="16" />导出备份</button>
+            <button class="button button-outline" :disabled="importing" @click="file?.click()"><Upload :size="16" />{{ importing ? '导入中…' : '导入备份' }}</button>
+            <button class="button button-outline" @click="store.exportEvaluationReport"><Download :size="16" />导出算法鲁棒性评测报告</button>
+            <input ref="file" class="sr-only" type="file" accept=".json,application/json" @change="importFile" />
+          </div>
           <button class="setting-link danger-link" @click="confirm = 'history'"><Trash2 :size="16" />清除监测历史<span>{{ store.sessions.length }} 段</span><ChevronRight :size="15" /></button>
           <button class="setting-link" @click="confirm = 'defaults'">恢复默认设置<ChevronRight :size="15" /></button>
         </section>

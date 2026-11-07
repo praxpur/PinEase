@@ -76,7 +76,7 @@ export function sanitizeSettings(value: unknown): Settings {
     soundVolume: bounded(v.soundVolume, 0, 100, defaults.soundVolume),
     soundRepeats: Math.round(bounded(v.soundRepeats, 1, 3, defaults.soundRepeats)),
     notificationsEnabled: flag('notificationsEnabled'), focusReminder: flag('focusReminder'),
-    blinkEnabled: flag('blinkEnabled'), fps: bounded(v.fps, 5, 20, defaults.fps),
+    blinkEnabled: flag('blinkEnabled'), eyeCareAuto: flag('eyeCareAuto'), lowLightBoost: flag('lowLightBoost'), fps: bounded(v.fps, 5, 20, defaults.fps),
   }
 }
 

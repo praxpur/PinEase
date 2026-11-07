@@ -137,6 +137,9 @@ export function checkCalibrationCoverage(timestamps: number[], minimumSpanMs = 6
 export function normalCoverage(channels: PostureVerdict['channels']): string {
   const head = channels.headPitch.status === 'normal' ? '头部俯仰' : '可见头肩'
   const torso = channels.torsoHeight.status !== 'disabled' ? channels.torsoHeight : channels.torsoAngle
+  if (torso.status === 'disabled' && channels.shoulderTilt.status !== 'disabled') {
+    return `${head}与双肩范围未见持续偏离`
+  }
   const torsoNote = torso.status === 'normal' ? '躯干参考未见持续偏离'
     : torso.status === 'bad' ? '躯干有变化，尚未满足整体提醒条件'
       : torso.status === 'unknown' ? '躯干暂不可判断' : '躯干检测未启用'

@@ -1,10 +1,16 @@
 import type { PoseModelPreference, VisionFrame, VisionReply } from '@/domain/types'
+import { analyzeLighting, applyGammaLut, type LightingReport } from '@/lib/lighting'
 
 export class VisionCamera {
   stream: MediaStream | null = null
   video: HTMLVideoElement | null = null
+  lowLightBoost = true
+  lastLighting: LightingReport = { luma: 128, centerLuma: 128, edgeLuma: 128, contrast: 32, status: 'normal', gamma: 1, boostApplied: false }
   private worker: Worker | null = null
   private fallbackVideo: HTMLVideoElement | null = null
+  private sampleCanvas: HTMLCanvasElement | null = null
+  private boostCanvas: HTMLCanvasElement | null = null
+  private frameCounter = 0
   private timer: number | null = null
   private busy = false
   private closed = false
@@ -15,10 +21,13 @@ export class VisionCamera {
     private onFrame: (frame: VisionFrame) => void,
     private onError: (message: string) => void,
     private getPreviewVideo: () => HTMLVideoElement | null,
+    private onLighting?: (report: LightingReport) => void,
   ) {}
 
-  async open(cameraId: string, facingMode: 'user' | 'environment', blink: boolean, fps: number, preference: PoseModelPreference = 'auto', headPose = false): Promise<{ delegate: string; model?: 'full' | 'lite'; blink: boolean; headPoseAvailable?: boolean; warning?: string; cameraId: string }> {
+  async open(cameraId: string, facingMode: 'user' | 'environment', blink: boolean, fps: number, preference: PoseModelPreference = 'auto', headPose = false, lowLightBoost = true): Promise<{ delegate: string; model?: 'full' | 'lite'; blink: boolean; headPoseAvailable?: boolean; warning?: string; cameraId: string }> {
     this.closed = false
+    this.lowLightBoost = lowLightBoost
+    this.frameCounter = 0
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error('摄像头需要 localhost 或 HTTPS。请通过本地启动地址打开。')
     if (typeof Worker === 'undefined' || typeof createImageBitmap === 'undefined') throw new Error('当前浏览器缺少识别所需能力，请使用新版 Chrome 或 Edge。')
     this.stream = await navigator.mediaDevices.getUserMedia({
@@ -39,7 +48,15 @@ export class VisionCamera {
       throw new Error('无法播放摄像头画面。请确认浏览器允许自动播放媒体，然后重试。')
     })
     const track = this.stream.getVideoTracks()[0]
-    if (track) track.onended = () => { if (!this.closed) this.onError('摄像头已断开，请重新连接后开始。') }
+    if (track) {
+      track.onended = () => { if (!this.closed) this.onError('摄像头已断开，请重新连接后开始。') }
+      try {
+        const caps = (track as unknown as { getCapabilities?: () => Record<string, unknown> }).getCapabilities?.()
+        if (caps && Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) {
+          void track.applyConstraints({ advanced: [{ exposureMode: 'continuous' } as unknown as MediaTrackConstraintSet] }).catch(() => {})
+        }
+      } catch { /* 硬件曝光控制可选 */ }
+    }
     this.worker = new Worker(new URL('../workers/vision.worker.ts', import.meta.url), { type: 'module' })
     const result = await new Promise<{ delegate: string; model?: 'full' | 'lite'; blink: boolean; headPoseAvailable?: boolean; warning?: string }>((resolve, reject) => {
       const timeout = window.setTimeout(() => reject(new Error('模型加载超时，请检查本地模型文件。')), 60000)
@@ -58,6 +75,52 @@ export class VisionCamera {
     if (this.closed) throw new Error('已取消启动。')
     this.timer = window.setInterval(() => { void this.capture() }, 1000 / Math.max(fps, blink ? 15 : 5))
     return { ...result, cameraId: track?.getSettings().deviceId ?? cameraId }
+  }
+
+  private prepareBitmapSource(source: HTMLVideoElement): CanvasImageSource {
+    try {
+      this.frameCounter++
+      if (this.frameCounter % 6 === 1) {
+        if (!this.sampleCanvas) {
+          const c = document.createElement('canvas')
+          if (typeof c.getContext === 'function') {
+            c.width = 64
+            c.height = 48
+            this.sampleCanvas = c
+          }
+        }
+        const ctx = this.sampleCanvas?.getContext?.('2d', { willReadFrequently: true })
+        if (ctx) {
+          ctx.drawImage(source, 0, 0, 64, 48)
+          const img = ctx.getImageData(0, 0, 64, 48)
+          const report = analyzeLighting(img.data, 64, 48)
+          report.boostApplied = this.lowLightBoost && report.status !== 'normal'
+          this.lastLighting = report
+          this.onLighting?.(report)
+        }
+      }
+      if (this.lowLightBoost && this.lastLighting.status !== 'normal' && this.sampleCanvas) {
+        const w = source.videoWidth || 640
+        const h = source.videoHeight || 480
+        if (!this.boostCanvas) {
+          const bc = document.createElement('canvas')
+          if (typeof bc.getContext === 'function') this.boostCanvas = bc
+        }
+        if (this.boostCanvas) {
+          this.boostCanvas.width = w
+          this.boostCanvas.height = h
+          const bctx = this.boostCanvas.getContext('2d', { willReadFrequently: true })
+          if (bctx) {
+            bctx.drawImage(source, 0, 0, w, h)
+            const frameData = bctx.getImageData(0, 0, w, h)
+            applyGammaLut(frameData.data, this.lastLighting.gamma)
+            bctx.putImageData(frameData, 0, 0)
+            return this.boostCanvas
+          }
+        }
+      }
+    } catch { /* fallback to raw video element */ }
+    return source
   }
 
   private async capture() {
@@ -86,7 +149,8 @@ export class VisionCamera {
       if (source.readyState < 2 || source.currentTime === this.lastVideoTime) { this.busy = false; return }
       this.lastVideoTime = source.currentTime
       const timestamp = performance.now()
-      const bitmap = await createImageBitmap(source)
+      const bitmapSource = this.prepareBitmapSource(source)
+      const bitmap = await createImageBitmap(bitmapSource)
       if (this.closed || !this.worker) { bitmap.close(); this.busy = false; return }
       this.worker.postMessage({ type: 'frame', bitmap, timestamp }, [bitmap])
     } catch { this.busy = false }
@@ -108,6 +172,8 @@ export class VisionCamera {
     }
     this.fallbackVideo?.remove()
     this.fallbackVideo = null
+    this.sampleCanvas = null
+    this.boostCanvas = null
     this.stream = null
     this.video = null
     this.busy = false
@@ -122,4 +188,3 @@ export function cameraError(error: unknown): string {
   }
   return error instanceof Error ? error.message : '暂时无法启动摄像头，请重试。'
 }
-

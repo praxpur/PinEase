@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
-import { ArrowUpRight, X, ShieldCheck, Expand, Leaf } from 'lucide-vue-next'
+import { ArrowUpRight, X, ShieldCheck, Expand, Leaf, Eye } from 'lucide-vue-next'
 import { useMonitorStore } from '@/stores/monitor'
 import { clock } from '@/lib/format'
 import AppDialog from '@/components/ui/AppDialog.vue'
@@ -11,6 +11,12 @@ const privacy = ref(false)
 const installPrompt = shallowInstall()
 function shallowInstall() { return ref<(Event & { prompt: () => Promise<void> }) | null>(null) }
 const restTitle = computed(() => store.restKind === 'posture' ? '让身体回到舒服的位置。' : '给自己一分钟。')
+const exercisePrompt = computed(() => {
+  if (store.exerciseStep === 'left') return '第 1 步 / 共 3 步：缓慢向左转头或轻柔侧倾，舒展右侧颈部'
+  if (store.exerciseStep === 'right') return '第 2 步 / 共 3 步：缓慢向右转头或轻柔侧倾，舒展左侧颈部'
+  if (store.exerciseStep === 'up') return '第 3 步 / 共 3 步：轻轻抬头挺胸，深呼吸放松双肩'
+  return '颈部舒展已完成，做得很棒！'
+})
 onMounted(() => {
   void store.init()
   if (window.pineaseDesktop?.isDesktop) {
@@ -35,7 +41,15 @@ async function fullscreen() {
         <span>PinEase<small>青松坐姿</small></span>
       </RouterLink>
       <nav class="main-nav" aria-label="主导航"><RouterLink to="/">监测</RouterLink><RouterLink to="/history">历史</RouterLink><RouterLink to="/settings">设置</RouterLink></nav>
-      <div class="header-status"><span v-if="store.demo" class="demo-badge">演示模式</span><span v-else-if="store.running" class="header-live"><span class="status-dot on" />正在监测</span><span v-else class="header-local"><ShieldCheck :size="14" />本地运行</span><button v-if="installPrompt && !store.desktopRuntime" class="small-button install-button" @click="install">安装到桌面<ArrowUpRight :size="13" /></button></div>
+      <div class="header-status">
+        <button class="small-button eye-care-toggle" :class="{ active: store.eyeCareActive }" :aria-pressed="store.eyeCareActive" title="切换柔和护眼暖光" @click="store.toggleEyeCare()">
+          <Eye :size="13" />{{ store.eyeCareActive ? '护眼已开' : '护眼' }}
+        </button>
+        <span v-if="store.demo" class="demo-badge">演示模式</span>
+        <span v-else-if="store.running" class="header-live"><span class="status-dot on" />正在监测</span>
+        <span v-else class="header-local"><ShieldCheck :size="14" />本地运行</span>
+        <button v-if="installPrompt && !store.desktopRuntime" class="small-button install-button" @click="install">安装到桌面<ArrowUpRight :size="13" /></button>
+      </div>
     </header>
     <main id="main-content" class="main-content"><RouterView /></main>
     <footer class="site-footer"><div class="footer-brand">PinEase<span>给专注一点空间。</span></div><div class="footer-links"><button @click="privacy = true">隐私与数据</button><span>人体工学习惯提醒 · 非医疗诊断</span></div><span class="footer-year">2026</span></footer>
@@ -47,8 +61,19 @@ async function fullscreen() {
     <div class="privacy-detail"><h3>画面与关键点</h3><p>摄像头画面和逐帧关键点只用于本机识别，不录制、不保存，也不会上传服务器。</p><h3>保存的内容</h3><p>参考坐姿的汇总参数、设置、状态区间和提醒记录保存在本机。清除应用数据会移除它们，你可以先导出备份。</p><h3>运行方式</h3><p>{{ store.desktopRuntime ? 'Windows 应用最小化到托盘后仍可监测；电脑锁定或睡眠时暂停。' : '网页切换到后台会暂停并关闭摄像头。回到页面后可手动继续。' }}休息画面作用于本应用，不会调节其他软件或系统亮度。</p><h3>你的选择</h3><p>开始前由你授权摄像头；暂停或结束会关闭设备。{{ store.desktopRuntime ? '桌面版提供应用内提醒。' : '声音和浏览器通知由你开启。' }}</p></div>
   </AppDialog>
   <AppDialog :open="store.restOpen" :title="restTitle" :description="store.restKind === 'posture' ? '放松肩膀，回到你的舒适参考。坐姿恢复后，这个页面会自动退去。' : '离开屏幕，活动一下，看看远处。准备好了，随时可以回来。'" @update:open="store.closeRest()">
-    <div class="rest-content"><Leaf :size="42" :stroke-width="1" /><span class="rest-clock">{{ clock(store.restRemaining) }}</span><p>不赶时间，慢慢来。</p></div>
+    <div class="rest-content">
+      <Leaf :size="42" :stroke-width="1" />
+      <span class="rest-clock">{{ clock(store.restRemaining) }}</span>
+      <p>不赶时间，慢慢来。</p>
+      <div v-if="!store.exerciseActive" class="exercise-Launcher">
+        <button class="small-button" @click="store.startNeckExercise()">开始 30 秒颈部舒展互动</button>
+      </div>
+      <div v-else class="neck-exercise-card" role="status">
+        <strong>颈部舒展体感引导</strong>
+        <p>{{ exercisePrompt }}</p>
+        <div class="exercise-progress-bar"><div class="exercise-progress-fill" :style="{ width: store.exerciseProgress + '%' }" /></div>
+      </div>
+    </div>
     <div class="dialog-actions"><button class="button button-outline" @click="fullscreen"><Expand :size="15" />进入全屏</button><button class="button button-primary" @click="store.closeRest">返回监测</button></div>
   </AppDialog>
 </template>
-

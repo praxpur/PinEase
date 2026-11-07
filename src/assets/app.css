@@ -497,3 +497,37 @@ button svg, a svg { flex: 0 0 auto; }
 .head-pose-info strong { font-weight: 600; }
 .head-pose-info p { margin-top: 5px; color: var(--night-muted, #77816b); }
 @media (max-width: 720px) { .head-pose-info { grid-column: 1 / -1; } }
+
+/* Eye-care warm filter & interactive neck exercise & organization board */
+:root.eye-care-mode::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background: rgba(242, 184, 102, 0.14);
+  mix-blend-mode: multiply;
+}
+:root[data-theme="dark"].eye-care-mode::after {
+  background: rgba(235, 168, 78, 0.11);
+  mix-blend-mode: screen;
+}
+.eye-care-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; font-size: 12px; border-radius: 999px; }
+.eye-care-toggle.active { background: #f3e4c3; border-color: #c8a258; color: #694b16; font-weight: 600; }
+:root[data-theme="dark"] .eye-care-toggle.active { background: #493b21; border-color: #b89146; color: #f6deb0; }
+
+.exercise-Launcher { margin-top: 10px; }
+.neck-exercise-card { width: 100%; max-width: 360px; margin-top: 12px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--night-border, #d8dfd0); background: var(--night-soft, #f5f6ee); text-align: left; }
+.neck-exercise-card strong { display: block; font-size: 13px; color: var(--night-text, #384933); }
+.neck-exercise-card p { margin-top: 4px; font-size: 12px; color: var(--night-muted, #637059); }
+.exercise-progress-bar { width: 100%; height: 6px; margin-top: 9px; border-radius: 999px; background: #dfe5d6; overflow: hidden; }
+.exercise-progress-fill { height: 100%; background: #4b6e48; transition: width 0.25s ease; }
+
+.org-board-section { margin-top: 42px; padding-top: 28px; border-top: 1px solid var(--night-border, #e2e6da); }
+.org-actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
+.org-seat-input { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--night-muted, #626e58); }
+.org-seat-input input { padding: 7px 11px; border: 1px solid var(--night-border, #cbd3c0); border-radius: 6px; background: var(--night-surface, #fffefa); color: inherit; font-size: 13px; }
+.org-summary-box { margin-top: 20px; }
+.org-overview { margin-top: 12px; margin-bottom: 18px; }
+.org-table .org-row { cursor: default; }
+
