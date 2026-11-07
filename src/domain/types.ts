@@ -1,6 +1,18 @@
 export type ViewMode = 'front' | 'side'
 export type TrackingSide = 'left' | 'right'
 export type CameraFacingMode = 'user' | 'environment'
+export type PoseModelPreference = 'auto' | 'full' | 'lite'
+export interface HeadPose {
+  // Raw XYZ Euler angles in degrees from MediaPipe's column-major face transform.
+  // Signs are matrix-relative; left/right/up/down labels require camera validation.
+  pitch: number
+  yaw: number
+  roll: number
+  faceCenterX: number
+  faceCenterY: number
+  faceWidth: number
+  observedAt: number
+}
 export type Phase = 'idle' | 'loading' | 'ready' | 'calibrating' | 'monitoring' | 'paused'
 export type PostureState = 'need_cal' | 'normal' | 'candidate_bad' | 'bad' | 'unknown' | 'absent' | 'paused'
 export type ReminderKind = 'posture' | 'break' | 'eyes'
@@ -16,6 +28,8 @@ export interface Landmark {
 
 export interface Settings {
   cameraId: string
+  modelPreference: PoseModelPreference
+  headPoseEnabled: boolean
   cameraFacingMode: CameraFacingMode
   view: ViewMode
   showPreview: boolean
@@ -51,7 +65,11 @@ export interface Features {
 }
 
 export interface Calibration {
+  faceBaseline?: { pitch: number; yaw: number; roll: number } | null
   featureVersion?: number
+  poseModel?: 'full' | 'lite'
+  calibrationNoise?: Partial<Record<'drop' | 'shift' | 'shoulders' | 'scale' | 'neck' | 'torso' | 'headPitch' | 'neckHeight' | 'torsoHeight', number>>
+  channelCoverage?: Partial<Record<'headPitch' | 'neckHeight' | 'torsoHeight' | 'torso', number>>
   id: string
   view: ViewMode
   cameraId: string
@@ -68,6 +86,7 @@ export interface Observation {
   reason: string
   features: Features | null
   quality: number
+  channelQuality?: Partial<Record<'headPitch' | 'neckHeight' | 'torsoHeight' | 'neckAngle' | 'torsoAngle' | 'shoulderTilt' | 'headShift' | 'proximity', number>>
 }
 
 export interface StateSegment {
@@ -86,6 +105,8 @@ export interface ReminderEvent {
 
 export interface SessionRecord {
   id: string
+  accountingVersion?: 2
+  candidateSeconds?: number
   mode: 'real' | 'demo'
   startedAt: number
   endedAt: number | null
@@ -101,6 +122,7 @@ export interface SessionRecord {
 
 export interface DailyStats {
   date: string
+  candidateSeconds: number
   goodSeconds: number
   badSeconds: number
   unknownSeconds: number
@@ -118,15 +140,22 @@ export interface VisionFrame {
   height: number
   blink: number | null
   inferenceMs: number
+  headPose?: HeadPose | null
+  poseInferenceMs?: number
+  faceInferenceMs?: number | null
+  faceTimestamp?: number | null
+  droppedFrames?: number
 }
 
 export type VisionReply =
   | VisionFrame
-  | { type: 'ready'; delegate: 'GPU' | 'CPU'; blink: boolean; warning?: string }
+  | { type: 'ready'; delegate: 'GPU' | 'CPU'; model: 'full' | 'lite'; blink: boolean; headPoseAvailable: boolean; warning?: string }
   | { type: 'error'; message: string }
 
 export const DEFAULT_SETTINGS: Settings = {
   cameraId: '',
+  modelPreference: 'auto',
+  headPoseEnabled: false,
   cameraFacingMode: 'user',
   view: 'front',
   showPreview: true,

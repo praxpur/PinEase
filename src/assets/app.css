@@ -103,6 +103,13 @@ button svg, a svg { flex: 0 0 auto; }
 .sample-note { margin-top: 15px; color: var(--night-muted, #8a9677); font-size: 10px; }
 .signal-line { width: 100%; font-size: 9px; color: var(--night-muted, #a0a691); display: flex; align-items: center; gap: 6px; margin-top: 17px; }
 .signal-line > span:last-child { margin-left: auto; }
+.channel-details { width: 100%; margin-top: 12px; color: var(--night-muted, #77816b); font-size: 12px; }
+.channel-details summary { cursor: pointer; min-height: 32px; padding: 6px 0; color: var(--night-text, #53634a); }
+.channel-details ul { list-style: none; padding: 0; margin: 7px 0; }
+.channel-details li { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; }
+.channel-details strong { font-weight: 500; white-space: nowrap; }
+.channel-details strong.bad { color: var(--night-warning, #a97f66); }
+.channel-details p { line-height: 1.6; margin-top: 6px; }
 .recalibrate-button { width: 100%; display: flex; align-items: center; gap: 7px; background: transparent; border: 0; border-top: 1px solid var(--night-border, #eceee6); padding: 12px 0 0; margin-top: 15px; color: var(--night-muted, #8d987d); font-size: 10px; }
 .recalibrate-button > svg:last-child { margin-left: auto; }
 .calibration-button { margin-top: 15px; width: 100%; }
@@ -297,7 +304,7 @@ button svg, a svg { flex: 0 0 auto; }
   .session-time { grid-column: 3; grid-row: 2 / 4; border: 0; padding: 0; }
   .session-time strong { font-size: 27px; margin-top: 6px; }
   .session-time > span { font-size: 8px; }
-  .signal-line, .recalibrate-button, .setup-note, .sample-note { grid-column: 1 / -1; }
+  .signal-line, .recalibrate-button, .setup-note, .sample-note, .channel-details { grid-column: 1 / -1; }
   .today-section { margin-top: 29px; }
   .today-metrics { flex-wrap: wrap; gap: 18px 0; }
   .today-metrics > div { min-width: 30%; padding: 0 16px; }
@@ -485,3 +492,8 @@ button svg, a svg { flex: 0 0 auto; }
   .monitor-control-button { min-width: 0; min-height: 48px; padding: 12px; }
   .monitor-control-buttons > button:only-child { grid-column: 1 / -1; }
 }
+
+.head-pose-info { width: 100%; margin-top: 14px; padding: 11px 12px; border: 1px solid var(--night-border, #dfe5d6); border-radius: 6px; background: var(--night-soft, #f4f5ec); color: var(--night-text, #53634a); font-size: 11px; line-height: 1.65; }
+.head-pose-info strong { font-weight: 600; }
+.head-pose-info p { margin-top: 5px; color: var(--night-muted, #77816b); }
+@media (max-width: 720px) { .head-pose-info { grid-column: 1 / -1; } }

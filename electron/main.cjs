@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, net, powerMonitor, protocol, session, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, Tray, Notification, nativeImage, net, powerMonitor, protocol, session, ipcMain } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { isTrustedUrl, canRequest, canCheck } = require('./permissions.cjs')
@@ -18,6 +18,7 @@ let trayRef = null
 let appState = 'idle'
 let allowQuit = false
 let quitPending = false
+let lastNotification = { key: '', at: 0 }
 
 if (!app.requestSingleInstanceLock()) app.quit()
 app.setPath('userData', path.join(app.getPath('appData'), 'PinEase'))
@@ -31,6 +32,10 @@ function showWindow() {
   if (windowRef.isMinimized()) windowRef.restore()
   windowRef.show()
   windowRef.focus()
+}
+
+function trustedRenderer(event) {
+  return event.sender === windowRef?.webContents && isTrustedUrl(event.sender.getURL(), developmentUrl)
 }
 
 function updateTrayMenu() {
@@ -144,6 +149,20 @@ app.whenReady().then(async () => {
   ipcMain.on('desktop:theme', (event, theme) => {
     if (event.sender !== windowRef?.webContents || !Object.hasOwn(titleBarColors, theme)) return
     windowRef.setTitleBarOverlay(titleBarColors[theme])
+  })
+  ipcMain.handle('desktop:notification-available', (event) => trustedRenderer(event) && Notification.isSupported())
+  ipcMain.handle('desktop:notify', (event, title, body) => {
+    if (!trustedRenderer(event) || !Notification.isSupported()) return false
+    if (typeof title !== 'string' || typeof body !== 'string' || !title.startsWith('PinEase · ')) return false
+    if (!title.trim() || !body.trim() || title.length > 80 || body.length > 300) return false
+    const key = title + '\n' + body
+    const now = Date.now()
+    if (lastNotification.key === key && now - lastNotification.at < 1500) return true
+    lastNotification = { key, at: now }
+    const notification = new Notification({ title, body, icon: path.join(app.getAppPath(), 'dist', 'favicon.ico') })
+    notification.on('click', showWindow)
+    notification.show()
+    return true
   })
   ipcMain.on('desktop:quit-ready', (event) => {
     if (event.sender !== windowRef?.webContents || !quitPending) return

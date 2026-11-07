@@ -1,4 +1,4 @@
-import type { VisionFrame, VisionReply } from '@/domain/types'
+import type { PoseModelPreference, VisionFrame, VisionReply } from '@/domain/types'
 
 export class VisionCamera {
   stream: MediaStream | null = null
@@ -17,7 +17,7 @@ export class VisionCamera {
     private getPreviewVideo: () => HTMLVideoElement | null,
   ) {}
 
-  async open(cameraId: string, facingMode: 'user' | 'environment', blink: boolean, fps: number): Promise<{ delegate: string; blink: boolean; warning?: string; cameraId: string }> {
+  async open(cameraId: string, facingMode: 'user' | 'environment', blink: boolean, fps: number, preference: PoseModelPreference = 'auto', headPose = false): Promise<{ delegate: string; model?: 'full' | 'lite'; blink: boolean; headPoseAvailable?: boolean; warning?: string; cameraId: string }> {
     this.closed = false
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error('摄像头需要 localhost 或 HTTPS。请通过本地启动地址打开。')
     if (typeof Worker === 'undefined' || typeof createImageBitmap === 'undefined') throw new Error('当前浏览器缺少识别所需能力，请使用新版 Chrome 或 Edge。')
@@ -41,7 +41,7 @@ export class VisionCamera {
     const track = this.stream.getVideoTracks()[0]
     if (track) track.onended = () => { if (!this.closed) this.onError('摄像头已断开，请重新连接后开始。') }
     this.worker = new Worker(new URL('../workers/vision.worker.ts', import.meta.url), { type: 'module' })
-    const result = await new Promise<{ delegate: string; blink: boolean; warning?: string }>((resolve, reject) => {
+    const result = await new Promise<{ delegate: string; model?: 'full' | 'lite'; blink: boolean; headPoseAvailable?: boolean; warning?: string }>((resolve, reject) => {
       const timeout = window.setTimeout(() => reject(new Error('模型加载超时，请检查本地模型文件。')), 60000)
       this.rejectReady = (error) => { clearTimeout(timeout); reject(error) }
       this.worker!.onerror = () => { clearTimeout(timeout); const message = '识别线程未能启动，请更新浏览器或重新打开页面。'; reject(new Error(message)); this.onError(message) }
@@ -53,7 +53,7 @@ export class VisionCamera {
         if (data.type === 'frame') { this.busy = false; this.onFrame(data) }
       }
       const assets = new URL(import.meta.env.BASE_URL, window.location.href).href
-      this.worker!.postMessage({ type: 'init', assets, blink })
+      this.worker!.postMessage({ type: 'init', assets, blink, preference, headPose })
     })
     if (this.closed) throw new Error('已取消启动。')
     this.timer = window.setInterval(() => { void this.capture() }, 1000 / Math.max(fps, blink ? 15 : 5))

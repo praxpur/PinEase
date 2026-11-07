@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ArrowDownToLine, ArrowUpRight, ChevronRight, Clock3, Leaf } from 'lucide-vue-next'
 import { useMonitorStore } from '@/stores/monitor'
 import { dailyStats, dateLabel, duration, localDay, shortTime } from '@/lib/format'
@@ -8,32 +8,35 @@ import type { SessionRecord } from '@/domain/types'
 import AppDialog from '@/components/ui/AppDialog.vue'
 import TrendChart from '@/components/TrendChart.vue'
 const store = useMonitorStore()
-const days = ref(7)
+const days = ref<7 | 30>(7)
 const example = ref(false)
 const details = ref<SessionRecord | null>(null)
-const source = computed(() => example.value ? demoRecords() : store.records)
+const visibleCount = ref(30)
+const source = computed(() => example.value ? demoRecords() : store.realRecords)
+watch([days, example], () => { visibleCount.value = 30 })
 const stats = computed(() => dailyStats(source.value, days.value))
 const summary = computed(() => {
   const effective = stats.value.reduce((sum, s) => sum + s.effectiveSeconds, 0)
   const good = stats.value.reduce((sum, s) => sum + s.goodSeconds, 0)
   return { effective, ratio: effective ? Math.round(good / effective * 100) : null, reminders: stats.value.reduce((sum, s) => sum + s.reminders, 0), activeDays: stats.value.filter((s) => s.effectiveSeconds > 0).length }
 })
-const visibleRecords = computed(() => {
+const filteredRecords = computed(() => {
   const first = stats.value[0]?.date ?? localDay()
   const last = stats.value[stats.value.length - 1]?.date ?? localDay()
-  return source.value.filter(s => s.segments.some(segment => localDay(segment.endedAt) >= first && localDay(segment.startedAt) <= last)).slice(0, 30)
+  return source.value.filter(s => s.segments.some(segment => localDay(segment.endedAt) >= first && localDay(segment.startedAt) <= last))
 })
-const simulated = computed(() => example.value || store.demo)
+const visibleRecords = computed(() => filteredRecords.value.slice(0, visibleCount.value))
+const simulated = computed(() => example.value)
 </script>
 
 <template>
   <div class="page-enter">
     <header class="page-heading">
       <div><div class="eyebrow">YOUR OWN RHYTHM</div><h1>看见自己的节奏。</h1><p>一点点觉察，留在每一天的记录里。</p></div>
-      <button class="button button-outline" :disabled="simulated || !store.sessions.length" @click="store.exportCSV"><ArrowDownToLine :size="16" />导出汇总</button>
+      <button class="button button-outline" :disabled="simulated || !store.realRecords.length" @click="store.exportCSV(days)"><ArrowDownToLine :size="16" />导出最近 {{ days }} 天</button>
     </header>
     <div class="history-toolbar">
-      <div class="segmented"><button v-for="range in [7, 30]" :key="range" :class="{ selected: days === range }" :aria-pressed="days === range" @click="days = range">最近 {{ range }} 天</button></div>
+      <div class="segmented"><button v-for="range in ([7, 30] as const)" :key="range" :class="{ selected: days === range }" :aria-pressed="days === range" @click="days = range">最近 {{ range }} 天</button></div>
       <button class="text-button" @click="example = !example">{{ example ? '返回我的记录' : '看看示例记录' }}<ArrowUpRight :size="15" /></button>
     </div>
     <div v-if="simulated" class="notice demo-notice">正在查看模拟数据，示例不会写入你的真实记录。</div>
@@ -48,7 +51,7 @@ const simulated = computed(() => example.value || store.demo)
       <div class="chart-panel"><div class="chart-heading"><h2>舒适参考的占比</h2><span>有效监测期间</span></div><div class="chart-description">没有有效记录的日期保留为空</div><TrendChart :stats="stats" variant="ratio" /></div>
     </section>
     <section class="records-section">
-      <div class="section-title-row"><h2>每一段专注</h2><span class="muted-text">{{ visibleRecords.length }} 段记录</span></div>
+      <div class="section-title-row"><h2>每一段专注</h2><span class="muted-text">显示 {{ visibleRecords.length }} / {{ filteredRecords.length }} 段记录</span></div>
       <div v-if="!visibleRecords.length" class="history-empty"><Leaf :size="30" :stroke-width="1.1" /><h3>第一段记录，从今天开始</h3><p>完成一次监测后，时长与提醒会安静地留在这里。</p><RouterLink to="/" class="text-link">开始一段专注<ArrowUpRight :size="16" /></RouterLink></div>
       <div v-else class="records-table">
         <div class="record-table-head"><span>开始时间</span><span>有效时长</span><span>参考坐姿</span><span>提醒</span><span /></div>
@@ -59,6 +62,7 @@ const simulated = computed(() => example.value || store.demo)
           <span>{{ record.reminders.length }} 次</span><ChevronRight :size="16" />
         </button>
       </div>
+      <button v-if="visibleCount < filteredRecords.length" class="button button-outline records-more" @click="visibleCount += 30">加载更多记录</button>
       <p class="records-footnote">占比由可靠识别的时长计算。未知、离座和暂停单列，避免把没有观察到的时间算成正常。</p>
     </section>
     <AppDialog :open="!!details" title="这一段专注" description="记录仅包含状态和统计，不包含摄像头画面。" @update:open="details = null">

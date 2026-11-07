@@ -8,6 +8,8 @@ declare global {
       onCommand: (callback: (command: 'pause' | 'resume' | 'quit') => void) => () => void
       setState: (state: 'idle' | 'running' | 'paused') => void
       setTheme: (theme: 'light' | 'dark') => void
+      notify: (title: string, body: string) => Promise<boolean>
+      notificationAvailable: () => Promise<boolean>
       readyToQuit: () => void
     }
   }

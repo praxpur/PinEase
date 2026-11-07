@@ -2,31 +2,15 @@
 
 一个安静的桌边坐姿提醒。
 
-这是从原 `PinEase` Vue 3 + TypeScript 工程复制后扩展的独立版本，目录为 **PinEase-Complete**，版本号 **1.0.0**。可以用于学习、现场演示和继续开发。
 
 ## 最快启动
 
-本机依赖和识别模型已经准备好。
-
-**Windows：**在这个目录运行：
-
-http://localhost:5180/
-
-或在这个目录运行：
-
 ```powershell
+git clone https://github.com/praxpur/PinEase.git
+cd PinEase
+npm.cmd ci
 npm.cmd run dev
 ```
-
-请使用终端显示的端口；若 5180 被占用，Vite 会提示其他端口。建议一直使用同一个地址，`localhost` 与 `127.0.0.1`、不同端口分别拥有自己的浏览器存储。
-
-不要直接双击 `index.html`。网页模块、Worker 和摄像头需要通过本地服务或 HTTPS 打开。
-
-手机浏览器请使用部署后的 HTTPS 地址打开。首次启动时允许摄像头权限，在设置页可选择前置或后置摄像头；切换方向后需要重新校准。为保持识别稳定，网页切换到后台会关闭摄像头，返回页面后手动继续。iPhone 可从 Safari 分享菜单添加到主屏幕；Android Chrome 可使用地址栏中的安装提示。通知和安装选项取决于浏览器支持情况。
-
-## 外观模式
-
-在设置页的「外观」中选择跟随系统、日间模式或夜间模式。默认跟随系统，手动选择保存在当前浏览器；图表、弹窗和插画同步切换。
 
 ## 第一次使用
 
@@ -103,7 +87,7 @@ npm.cmd run dev
 - MediaPipe Tasks Vision：姿态与可选人脸关键点。
 - idb / IndexedDB：本地数据。
 
-## 目录与学习顺序
+## 项目架构
 
 ```text
 src/
@@ -139,7 +123,6 @@ docs/实现说明.md               算法、计时、隐私和后续开发
 
 建议阅读顺序：`types.ts → posture.ts → monitor.ts → MonitorView.vue → storage.ts → HistoryView.vue → vision.ts / worker`。
 
-每次只修改一条完整数据流。例如添加一个统计：先定义数据，再更新记录与汇总，最后展示图表。不要先填一个与记录无关的固定数字。
 
 ## 在另一台电脑准备
 

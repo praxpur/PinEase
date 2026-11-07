@@ -18,6 +18,13 @@ contextBridge.exposeInMainWorld('pineaseDesktop', Object.freeze({
   setTheme(theme) {
     if (theme === 'light' || theme === 'dark') ipcRenderer.send('desktop:theme', theme)
   },
+  notify(title, body) {
+    if (typeof title !== 'string' || typeof body !== 'string') return Promise.resolve(false)
+    return ipcRenderer.invoke('desktop:notify', title, body)
+  },
+  notificationAvailable() {
+    return ipcRenderer.invoke('desktop:notification-available')
+  },
   readyToQuit() {
     ipcRenderer.send('desktop:quit-ready')
   },

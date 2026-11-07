@@ -1,10 +1,11 @@
 import { computed, markRaw, ref, shallowRef, toRaw } from 'vue'
 import { defineStore } from 'pinia'
-import { DEFAULT_SETTINGS, STATE_LABELS, type Calibration, type DemoPose, type Features, type Landmark, type Phase, type PostureState, type ReminderKind, type SessionRecord, type Settings, type VisionFrame } from '@/domain/types'
-import { classify, makeCalibration, observe, smoothFeatures, POSTURE_FEATURE_VERSION } from '@/domain/posture'
+import { DEFAULT_SETTINGS, STATE_LABELS, type Calibration, type DemoPose, type Features, type HeadPose, type Landmark, type Phase, type PostureState, type ReminderKind, type SessionRecord, type Settings, type VisionFrame } from '@/domain/types'
+import { acceptFrameTimestamp, advancePostureHold, checkCalibrationCoverage, classify, makeCalibration, normalCoverage, observe, resumePostureHold, smoothFeatures, POSTURE_FEATURE_VERSION, type PostureVerdict } from '@/domain/posture'
 import * as storage from '@/lib/storage'
 import { dailyStats, downloadFile, localDay } from '@/lib/format'
 import { DEMO_FEATURES, demoCalibration } from '@/lib/demo'
+import { calibrateHeadPose } from '@/lib/head-pose'
 import { BlinkTracker } from '@/domain/blink'
 import { detectInversion, ALIEN_MESSAGE, InversionTracker } from '@/domain/fun'
 import { playReminder } from '@/lib/audio'
@@ -31,17 +32,26 @@ export const useMonitorStore = defineStore('monitor', () => {
   const quality = ref(0)
   const inferenceMs = ref(0)
   const engine = ref('')
+  const poseModel = ref<'full' | 'lite'>('lite')
   const cameraId = ref('')
   const devices = ref<MediaDeviceInfo[]>([])
   const calibrationProgress = ref(0)
   const calibrationSamples = ref(0)
   const feature = shallowRef<Features | null>(null)
+  const channels = shallowRef<PostureVerdict['channels'] | null>(null)
   const deviation = ref(0)
   const session = ref<SessionRecord | null>(null)
   const demoSessions = ref<SessionRecord[]>([])
   const continuousSeconds = ref(0)
   const blinkRate = ref<number | null>(null)
   const blinkAvailable = ref(false)
+  const headPoseAvailable = ref(false)
+  const headPose = shallowRef<HeadPose | null>(null)
+  const headPoseDelta = computed(() => {
+    const current = headPose.value, baseline = profile.value?.faceBaseline
+    if (!current || !baseline || !settings.value.headPoseEnabled || phase.value !== 'monitoring') return null
+    return { pitch: current.pitch - baseline.pitch, yaw: current.yaw - baseline.yaw, roll: current.roll - baseline.roll }
+  })
   const blinkCount = ref(0)
   const blinkObservedSeconds = ref(0)
   const blinkStatus = ref('开启眨眼参考后开始采集')
@@ -63,12 +73,18 @@ export const useMonitorStore = defineStore('monitor', () => {
   let toastTimer: number | null = null
   let lastTick = 0
   let lastFrame = 0
+  let lastCapture = -Infinity
   let lastSmooth = 0
   let badSince: number | null = null
+  let badReason: string | null = null
+  let badGapStarted: number | null = null
+  let badConfirmedBeforeGap = false
   let goodSince: number | null = null
   let absentSince: number | null = null
   let calibrationStart = 0
   let calibrationBuffer: Features[] = []
+  let calibrationTimestamps: number[] = []
+  let faceCalibrationSamples: HeadPose[] = []
   let restEnd = 0
   let nextBreak = 0
   let audio: AudioContext | null = null
@@ -86,6 +102,8 @@ export const useMonitorStore = defineStore('monitor', () => {
     const base = demo.value ? demoSessions.value : sessions.value
     return session.value ? [session.value, ...base.filter((s) => s.id !== session.value?.id)] : base
   })
+  const realRecords = computed(() => session.value?.mode === 'real'
+    ? [session.value, ...sessions.value.filter(s => s.id !== session.value?.id)] : sessions.value)
   const today = computed(() => dailyStats(records.value, 1)[0]!)
   const elapsed = computed(() => session.value ? session.value.goodSeconds + session.value.badSeconds : 0)
   const stateLabel = computed(() => phase.value === 'idle' ? '还没有开始' : phase.value === 'loading' ? '正在准备摄像头' : STATE_LABELS[state.value])
@@ -127,11 +145,12 @@ export const useMonitorStore = defineStore('monitor', () => {
     } catch { devices.value = [] }
   }
 
-  function queueSave(job: () => Promise<void>) {
-    saving = saving.then(job).catch(() => {
-      storageWarning.value = '记录暂时无法写入浏览器，请先导出备份。'
+  function queueSave(job: () => Promise<void>): Promise<boolean> {
+    let succeeded = false
+    saving = saving.then(async () => { await job(); succeeded = true }).catch(() => {
+      storageWarning.value = '记录暂时无法写入本机，请先导出备份。'
     })
-    return saving
+    return saving.then(() => succeeded)
   }
 
   async function persist(record: SessionRecord | null = session.value) {
@@ -146,9 +165,15 @@ export const useMonitorStore = defineStore('monitor', () => {
   function resetDynamics() {
     resetFun()
     feature.value = null
+    channels.value = null
+    headPose.value = null
     lastFrame = 0
+    lastCapture = -Infinity
     lastSmooth = 0
     badSince = goodSince = absentSince = null
+    badReason = null
+    badGapStarted = null
+    badConfirmedBeforeGap = false
     blinkTracker.reset()
     blinkFaceMissing = true
     blinkCount.value = blinkObservedSeconds.value = 0
@@ -161,6 +186,7 @@ export const useMonitorStore = defineStore('monitor', () => {
   function createSession(mode: 'real' | 'demo') {
     session.value = {
       id: crypto.randomUUID(), mode, startedAt: Date.now(), endedAt: null, view: mode === 'demo' ? 'front' : settings.value.view,
+      accountingVersion: 2, candidateSeconds: 0,
       goodSeconds: 0, badSeconds: 0, unknownSeconds: 0, absentSeconds: 0, pausedSeconds: 0,
       reminders: [], segments: [],
     }
@@ -185,7 +211,8 @@ export const useMonitorStore = defineStore('monitor', () => {
       last.seconds += dt
     } else r.segments.push({ startedAt: start, endedAt: end, seconds: dt, state: s, reason: message })
     if (s === 'normal') r.goodSeconds += dt
-    if (s === 'bad' || s === 'candidate_bad') r.badSeconds += dt
+    if (s === 'bad') r.badSeconds += dt
+    if (s === 'candidate_bad') r.candidateSeconds = (r.candidateSeconds ?? 0) + dt
     if (s === 'unknown' || s === 'need_cal') r.unknownSeconds += dt
     if (s === 'absent') r.absentSeconds += dt
     if (s === 'paused') r.pausedSeconds += dt
@@ -194,6 +221,7 @@ export const useMonitorStore = defineStore('monitor', () => {
   function tick() {
     if (settings.value.blinkEnabled && blinkAvailable.value && phase.value === 'monitoring') showBlink(performance.now())
     const now = performance.now()
+    if (headPose.value && now - headPose.value.observedAt > 1500) headPose.value = null
     const gap = Math.max(0, (now - lastTick) / 1000)
     const dt = Math.min(gap, 1.5)
     lastTick = now
@@ -209,6 +237,9 @@ export const useMonitorStore = defineStore('monitor', () => {
       state.value = 'unknown'
       reason.value = '等待可靠的摄像头画面'
       badSince = goodSince = null
+      badReason = null
+      badGapStarted = null
+      badConfirmedBeforeGap = false
     }
     addSegment(current, reason.value, dt)
     if (current === 'normal' || current === 'bad' || current === 'candidate_bad') continuousSeconds.value += dt
@@ -247,20 +278,23 @@ export const useMonitorStore = defineStore('monitor', () => {
     }, () => cameraPreview))
     camera = active
     try {
-      const result = await active.open(settings.value.cameraId, settings.value.cameraFacingMode, settings.value.blinkEnabled, settings.value.fps)
+      const result = await active.open(settings.value.cameraId, settings.value.cameraFacingMode, settings.value.blinkEnabled, settings.value.fps, settings.value.modelPreference, settings.value.headPoseEnabled)
       if (generation !== token) { active.close(); return }
       cameraId.value = result.cameraId
       stream.value = active.stream ? markRaw(active.stream) : null
-      engine.value = result.delegate
+      engine.value = (result.model === 'full' ? 'Full' : 'Lite') + ' · ' + result.delegate
+      poseModel.value = result.model === 'full' ? 'full' : 'lite'
       blinkAvailable.value = result.blink
+      headPoseAvailable.value = result.headPoseAvailable === true
       frameWidth.value = active.video?.videoWidth || 640
       frameHeight.value = active.video?.videoHeight || 480
       const aspect = frameWidth.value / frameHeight.value
       const updatedFeatures = !!profile.value && profile.value.featureVersion !== POSTURE_FEATURE_VERSION
-      profileMismatch = updatedFeatures || !!profile.value && Math.abs(profile.value.aspect - aspect) > 0.08
+      const changedModel = !!profile.value && (profile.value.poseModel ?? 'lite') !== poseModel.value
+      profileMismatch = updatedFeatures || changedModel || !!profile.value && Math.abs(profile.value.aspect - aspect) > 0.08
       phase.value = profile.value && !profileMismatch ? 'monitoring' : 'ready'
       state.value = phase.value === 'monitoring' ? 'unknown' : 'need_cal'
-      reason.value = updatedFeatures ? '已新增抬低头与躯干检测，请重新校准' : profileMismatch ? '画面比例变了，请重新校准' : profile.value ? '等待识别你的坐姿' : '准备好后，花 8 秒建立参考坐姿'
+      reason.value = updatedFeatures ? '检测特征已更新，请重新校准' : changedModel ? '姿态模型已切换，请重新校准' : profileMismatch ? '画面比例变了，请重新校准' : profile.value ? '等待识别你的坐姿' : '准备好后，花 8 秒建立参考坐姿'
       if (!session.value) createSession('real')
       else lastTick = performance.now()
       if (result.warning) announce('坐姿监测已准备好', result.warning)
@@ -284,6 +318,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     demo.value = true
     demoPose.value = 'normal'
     blinkAvailable.value = false
+    headPoseAvailable.value = false
     resetDynamics()
     phase.value = 'monitoring'
     state.value = 'normal'
@@ -305,24 +340,44 @@ export const useMonitorStore = defineStore('monitor', () => {
     updatePosture(f, demoCalibration(), now)
   }
 
-  function updatePosture(f: Features, reference: Calibration, now: number) {
-    const exitSensitivity = state.value === 'bad' ? settings.value.sensitivity / 0.7 : settings.value.sensitivity
-    const verdict = classify(f, reference, { ...settings.value, sensitivity: exitSensitivity })
+  function updatePosture(f: Features, reference: Calibration, now: number, channelQuality?: import('@/domain/types').Observation['channelQuality']) {
+    if (badGapStarted !== null) {
+      badSince = resumePostureHold(badSince, badGapStarted, now)
+      if (badSince === null) { badReason = null; badConfirmedBeforeGap = false }
+      badGapStarted = null
+    }
+    const wasConfirmed = state.value === 'bad' || badConfirmedBeforeGap
+    const exitSensitivity = wasConfirmed ? settings.value.sensitivity / 0.7 : settings.value.sensitivity
+    const verdict = classify(f, reference, { ...settings.value, sensitivity: exitSensitivity }, channelQuality)
+    channels.value = verdict.channels
     deviation.value = verdict.deviation
-    if (verdict.bad) {
-      const latched = state.value === 'bad'
+    if (verdict.unknown) {
+      badGapStarted ??= now
+      badConfirmedBeforeGap ||= state.value === 'bad'
       goodSince = null
-      badSince ??= now
-      state.value = latched || now - badSince >= settings.value.holdSeconds * 1000 ? 'bad' : 'candidate_bad'
+      state.value = 'unknown'
+      reason.value = verdict.reason
+      if (restOpen.value && restKind.value === 'posture') closeRest()
+      return
+    }
+    if (verdict.bad) {
+      goodSince = null
+      const hold = advancePostureHold({ reason: badReason, since: badSince }, verdict.reason, now, settings.value.holdSeconds, wasConfirmed)
+      badReason = hold.reason
+      badSince = hold.since
+      badConfirmedBeforeGap = false
+      state.value = hold.confirmed ? 'bad' : 'candidate_bad'
       reason.value = verdict.reason
     } else {
       badSince = null
-      if (state.value === 'bad') {
+      badReason = null
+      badConfirmedBeforeGap = false
+      if (wasConfirmed) {
         goodSince ??= now
-        if (now - goodSince < settings.value.recoverySeconds * 1000) { reason.value = '正在回到参考坐姿'; return }
+        if (now - goodSince < settings.value.recoverySeconds * 1000) { state.value = 'bad'; reason.value = '正在回到参考坐姿'; return }
       }
       state.value = 'normal'
-      reason.value = '保持舒适的参考坐姿'
+      reason.value = normalCoverage(verdict.channels)
       goodSince = null
       if (restOpen.value && restKind.value === 'posture') closeRest()
     }
@@ -333,8 +388,13 @@ export const useMonitorStore = defineStore('monitor', () => {
     quality.value = result.quality
     if (!result.valid || !result.features) {
       feature.value = null
+      channels.value = null
       lastSmooth = 0
-      badSince = goodSince = null
+      goodSince = null
+      if (badGapStarted === null) {
+        badGapStarted = now
+        badConfirmedBeforeGap = state.value === 'bad'
+      }
       if (result.noPerson) {
         absentSince ??= now
         state.value = now - absentSince >= 5000 ? 'absent' : 'unknown'
@@ -346,8 +406,11 @@ export const useMonitorStore = defineStore('monitor', () => {
     }
     absentSince = null
     if (phase.value === 'calibrating') {
+      channels.value = null
       calibrationBuffer.push(result.features)
-      calibrationSamples.value = calibrationBuffer.length
+      calibrationTimestamps.push(now)
+      const leftSamples = settings.value.view === 'side' ? calibrationBuffer.filter(sample => sample.side === 'left').length : 0
+      calibrationSamples.value = settings.value.view === 'side' ? Math.max(leftSamples, calibrationBuffer.length - leftSamples) : calibrationBuffer.length
       feature.value = result.features
       return
     }
@@ -355,12 +418,14 @@ export const useMonitorStore = defineStore('monitor', () => {
     const elapsed = lastSmooth ? (now - lastSmooth) / 1000 : 10
     feature.value = smoothFeatures(feature.value, result.features, elapsed)
     lastSmooth = now
-    updatePosture(feature.value, profile.value, now)
+    updatePosture(feature.value, profile.value, now, result.channelQuality)
   }
 
   function onFrame(frame: VisionFrame) {
     if (!running.value || demo.value) return
-    lastFrame = performance.now()
+    if (!acceptFrameTimestamp(frame.timestamp, performance.now(), lastCapture)) return
+    lastCapture = frame.timestamp
+    lastFrame = frame.timestamp
     landmarks.value = frame.landmarks
     frameWidth.value = frame.width
     frameHeight.value = frame.height
@@ -373,9 +438,11 @@ export const useMonitorStore = defineStore('monitor', () => {
       announce('需要重新校准', '摄像头方向或画面比例已变化，请重新校准后继续监测。')
     }
     inferenceMs.value = frame.inferenceMs
-    handleObservation(frame.landmarks, lastFrame, frame.width, frame.height)
+    handleObservation(frame.landmarks, frame.timestamp, frame.width, frame.height)
+    headPose.value = settings.value.headPoseEnabled ? frame.headPose ?? null : null
+    if (phase.value === 'calibrating' && quality.value >= 0.55 && headPose.value) faceCalibrationSamples.push(headPose.value)
     if (phase.value === 'ready' || phase.value === 'monitoring') {
-      if (funTracker.update(detectInversion(frame.landmarks, frame.width, frame.height), lastFrame)) showFun()
+      if (funTracker.update(detectInversion(frame.landmarks, frame.width, frame.height), frame.timestamp)) showFun()
     }
     if (settings.value.blinkEnabled && blinkAvailable.value && phase.value === 'monitoring') handleBlink(frame.blink, frame.timestamp)
   }
@@ -404,6 +471,8 @@ export const useMonitorStore = defineStore('monitor', () => {
     resetFun()
     calibrationStart = performance.now()
     calibrationBuffer = []
+    calibrationTimestamps = []
+    faceCalibrationSamples = []
     calibrationSamples.value = 0
     calibrationProgress.value = 0
     phase.value = 'calibrating'
@@ -411,22 +480,34 @@ export const useMonitorStore = defineStore('monitor', () => {
     reason.value = '保持舒适坐姿，头部和肩膀尽量不动'
     feature.value = null
     badSince = goodSince = null
+    badReason = null
+    badGapStarted = null
+    badConfirmedBeforeGap = false
   }
 
   function finishCalibration() {
     if (phase.value !== 'calibrating') return
     try {
-      const result = makeCalibration(calibrationBuffer, settings.value.view, cameraId.value, frameWidth.value / frameHeight.value)
+      const leftCount = calibrationBuffer.filter(sample => sample.side === 'left').length
+      const dominantSide = leftCount >= calibrationBuffer.length / 2 ? 'left' : 'right'
+      const coverageTimes = settings.value.view === 'side'
+        ? calibrationTimestamps.filter((_time, index) => calibrationBuffer[index]?.side === dominantSide)
+        : calibrationTimestamps
+      const timeCoverage = checkCalibrationCoverage(coverageTimes)
+      if (!timeCoverage.valid) throw new Error(timeCoverage.reason)
+      const result = makeCalibration(calibrationBuffer, settings.value.view, cameraId.value, frameWidth.value / frameHeight.value, poseModel.value)
+      result.faceBaseline = settings.value.headPoseEnabled ? calibrateHeadPose(faceCalibrationSamples) : null
       profiles.value = [result, ...profiles.value.filter((p) => p.id !== result.id)]
       profileMismatch = false
       calibrationProgress.value = 100
       phase.value = 'monitoring'
       state.value = 'normal'
-      reason.value = '参考坐姿已保存，继续专注吧'
+      reason.value = '参考坐姿已建立，继续专注吧'
       feature.value = null
       lastSmooth = 0
-      void queueSave(() => storage.saveCalibration(result))
+      void queueSave(() => storage.saveCalibration(result)).then(saved => { if (!saved) announce('参考仅在本次运行有效', '校准未能写入本机，请检查存储。', 'error') })
       const coverage = []
+      if (settings.value.headPoseEnabled && !result.faceBaseline) coverage.push('人脸参考不足，头姿实验功能暂不可用')
       if (result.baseline.headPitch == null) coverage.push('鼻耳位置未持续清晰，头部俯仰参考未启用')
       if (result.baseline.torsoHeight == null) coverage.push('髋部参考不足，含胸与上身下沉检测未启用')
       announce('校准完成', coverage.length ? coverage.join('；') + '。其余检测继续工作。' : '已建立头部俯仰与躯干高度参考。换机位后请重新校准。')
@@ -450,6 +531,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     camera = null
     stream.value = null
     calibrationBuffer = []
+    calibrationTimestamps = []
     resetDynamics()
     restOpen.value = false
     void persist()
@@ -480,6 +562,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     timer = saveTimer = null
     const ended = session.value
     session.value = null
+    demo.value = false
     resetDynamics()
     reason.value = '本次监测已结束'
     if (ended) {
@@ -514,6 +597,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     session.value?.reminders.push({ at: Date.now(), kind, message })
     announce(kind === 'posture' ? '坐得舒服一些' : kind === 'eyes' ? '给眼睛一点休息' : '该活动一下了', message, 'reminder')
     void playCue()
+    if (desktopRuntime.value) void window.pineaseDesktop?.notify('PinEase · 青松坐姿', message)
     if (!desktopRuntime.value && settings.value.notificationsEnabled && !demo.value && 'Notification' in window && Notification.permission === 'granted') {
       try { new Notification('PinEase · 青松坐姿', { body: message, tag: 'pinease-' + kind, icon: new URL(import.meta.env.BASE_URL + 'icon.svg', window.location.href).href }) } catch { /* 页面提醒继续可用 */ }
     }
@@ -534,16 +618,26 @@ export const useMonitorStore = defineStore('monitor', () => {
     restOpen.value = false
   }
 
-  async function updateSettings(partial: Partial<Settings>) {
+  async function testDesktopNotification() {
+    if (!desktopRuntime.value || !window.pineaseDesktop) return
+    const available = await window.pineaseDesktop.notificationAvailable()
+    if (!available) { announce('系统通知暂不可用', '请检查 Windows 通知设置。', 'error'); return }
+    const sent = await window.pineaseDesktop.notify('PinEase · 测试提醒', '这是一条测试通知，不计入监测历史。')
+    announce(sent ? '已发送测试通知' : '测试通知未显示', sent ? '请检查系统通知中心。' : '请检查 Windows 通知设置。', sent ? 'info' : 'error')
+  }
+
+  async function updateSettings(partial: Partial<Settings>): Promise<boolean> {
     const next = storage.sanitizeSettings({ ...settings.value, ...partial })
-    const needsRestart = next.view !== settings.value.view || next.cameraId !== settings.value.cameraId || next.cameraFacingMode !== settings.value.cameraFacingMode || next.blinkEnabled !== settings.value.blinkEnabled || next.fps !== settings.value.fps
+    const needsRestart = next.view !== settings.value.view || next.cameraId !== settings.value.cameraId || next.cameraFacingMode !== settings.value.cameraFacingMode || next.blinkEnabled !== settings.value.blinkEnabled || next.headPoseEnabled !== settings.value.headPoseEnabled || next.modelPreference !== settings.value.modelPreference || next.fps !== settings.value.fps
     if (needsRestart && (running.value || phase.value === 'paused' || busy.value)) await endSession()
     const breakChanged = next.sitMinutes !== settings.value.sitMinutes || next.breakEnabled !== settings.value.breakEnabled
     settings.value = next
     if (next.soundEnabled) prepareAudio()
     if (breakChanged) nextBreak = next.sitMinutes * 60
-    await queueSave(() => storage.saveSettings({ ...next }))
-    if (needsRestart) announce('设置已保存', '下次开始监测时使用新的设置。')
+    const saved = await queueSave(() => storage.saveSettings({ ...next }))
+    if (!saved) announce('设置仅在当前页面生效', '本机存储失败，请检查存储空间并导出备份。', 'error')
+    else if (needsRestart) announce('设置已保存', '下次开始监测时使用新的设置。')
+    return saved
   }
 
   async function requestNotifications() {
@@ -572,10 +666,10 @@ export const useMonitorStore = defineStore('monitor', () => {
     announce('备份已导出', '包含真实监测记录，不包含摄像头画面。')
   }
 
-  function exportCSV() {
+  function exportCSV(days: 7 | 30 = 30) {
     const rows = ['日期,正常秒数,偏离秒数,未知秒数,有效秒数,良好占比,提醒次数']
-    for (const d of dailyStats(sessions.value, 30)) rows.push([d.date, Math.round(d.goodSeconds), Math.round(d.badSeconds), Math.round(d.unknownSeconds), Math.round(d.effectiveSeconds), d.ratio === null ? '' : Math.round(d.ratio * 100) + '%', d.reminders].join(','))
-    downloadFile('PinEase-summary-' + localDay() + '.csv', '\uFEFF' + rows.join('\r\n'), 'text/csv;charset=utf-8')
+    for (const d of dailyStats(realRecords.value, days)) rows.push([d.date, Math.round(d.goodSeconds), Math.round(d.badSeconds), Math.round(d.unknownSeconds), Math.round(d.effectiveSeconds), d.ratio === null ? '' : Math.round(d.ratio * 100) + '%', d.reminders].join(','))
+    downloadFile('PinEase-summary-' + days + 'd-' + localDay() + '.csv', '\uFEFF' + rows.join('\r\n'), 'text/csv;charset=utf-8')
   }
 
   async function importBackup(text: string) {
@@ -629,12 +723,12 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   return {
-    settings, profiles, sessions, records, phase, state, reason, error, storageWarning, initialized, busy, running, desktopRuntime,
-    demo, demoPose, stream, landmarks, frameWidth, frameHeight, quality, inferenceMs, engine, devices,
-    calibrationProgress, calibrationSamples, feature, deviation, session, today, elapsed, profile,
-    continuousSeconds, blinkRate, blinkAvailable, blinkCount, blinkObservedSeconds, blinkStatus, toast, restOpen, restRemaining, restKind, stateLabel, stateColor,
+    settings, profiles, sessions, records, realRecords, phase, state, reason, error, storageWarning, initialized, busy, running, desktopRuntime,
+    demo, demoPose, stream, landmarks, frameWidth, frameHeight, quality, inferenceMs, engine, poseModel, devices,
+    calibrationProgress, calibrationSamples, feature, channels, deviation, session, today, elapsed, profile,
+    continuousSeconds, headPoseAvailable, headPose, headPoseDelta, blinkRate, blinkAvailable, blinkCount, blinkObservedSeconds, blinkStatus, toast, restOpen, restRemaining, restKind, stateLabel, stateColor,
     init, startCamera, startDemo, beginCalibration, pause, resume, endSession, updateSettings, refreshDevices,
-    requestNotifications, resetProfiles, exportBackup, exportCSV, importBackup, deleteHistory, dismissToast,
+    requestNotifications, testDesktopNotification, resetProfiles, exportBackup, exportCSV, importBackup, deleteHistory, dismissToast,
     closeRest, announce, previewSound, funMoment, dismissFun, bindCameraPreview, updateVideoSize, handleDesktopCommand,
   }
 })

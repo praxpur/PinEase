@@ -41,6 +41,7 @@ export function dailyStats(records: SessionRecord[], days: number): DailyStats[]
   return dayRange(days).map((date) => {
     let goodSeconds = 0
     let badSeconds = 0
+    let candidateSeconds = 0
     let unknownSeconds = 0
     let reminders = 0
     let sessions = 0
@@ -55,14 +56,23 @@ export function dailyStats(records: SessionRecord[], days: number): DailyStats[]
         const overlap = Math.max(0, Math.min(s.endedAt, dayEnd) - Math.max(s.startedAt, dayStart))
         const seconds = span > 0 ? s.seconds * overlap / span : 0
         if (s.state === 'normal') goodSeconds += seconds
-        if (s.state === 'bad' || s.state === 'candidate_bad') badSeconds += seconds
+        if (s.state === 'bad' || s.state === 'candidate_bad' && record.accountingVersion !== 2) badSeconds += seconds
+        if (s.state === 'candidate_bad') candidateSeconds += seconds
         if (s.state === 'unknown' || s.state === 'need_cal') unknownSeconds += seconds
       }
       reminders += record.reminders.filter((e) => localDay(e.at) === date).length
     }
     const effectiveSeconds = goodSeconds + badSeconds
-    return { date, goodSeconds, badSeconds, unknownSeconds, effectiveSeconds, reminders, sessions, ratio: effectiveSeconds > 0 ? goodSeconds / effectiveSeconds : null }
+    return { date, goodSeconds, badSeconds, candidateSeconds, unknownSeconds, effectiveSeconds, reminders, sessions, ratio: effectiveSeconds > 0 ? goodSeconds / effectiveSeconds : null }
   })
+}
+
+export function csvSummary(records: SessionRecord[], days: number): string {
+  const rows = ['日期,参考坐姿秒数,确认偏离秒数,候选变化秒数,未知秒数,有效监测秒数,参考坐姿占比,提醒次数']
+  for (const d of dailyStats(records, days)) {
+    rows.push([d.date, Math.round(d.goodSeconds), Math.round(d.badSeconds), Math.round(d.candidateSeconds), Math.round(d.unknownSeconds), Math.round(d.effectiveSeconds), d.ratio === null ? '' : Math.round(d.ratio * 100) + '%', d.reminders].join(','))
+  }
+  return '\uFEFF' + rows.join('\r\n')
 }
 
 export function downloadFile(name: string, contents: string, type = 'application/json'): void {

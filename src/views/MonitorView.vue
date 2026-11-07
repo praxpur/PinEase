@@ -18,6 +18,15 @@ const postureCoverage = computed(() => {
   const torso = baseline.torsoHeight == null ? '髋部参考不足，躯干未启用' : store.feature?.torsoHeight == null ? '髋部未看清，躯干暂不判断' : '含胸 / 上身下沉'
   return head + ' · ' + torso
 })
+const channelLabels = {
+  headPitch: '头部俯仰', neckHeight: '头颈高度', torsoHeight: '躯干高度',
+  neckAngle: '头颈角度', torsoAngle: '躯干角度', shoulderTilt: '肩线倾斜',
+  headShift: '头部横移', proximity: '画面尺度',
+} as const
+const channelStatus = { normal: '未见偏离', bad: '偏离参考', unknown: '暂不可判断', disabled: '未启用' } as const
+const channelDetails = computed(() => store.channels
+  ? Object.entries(store.channels).map(([key, result]) => ({ label: channelLabels[key as keyof typeof channelLabels], status: result.status, text: channelStatus[result.status], score: result.landmarkScore }))
+  : [])
 async function primary() {
   if (store.phase === 'paused') await store.resume()
   else if (store.phase === 'ready') store.beginCalibration()
@@ -38,22 +47,22 @@ const statusDescription = computed(() => {
 
 <template>
   <div class="page-enter">
-    <section class="monitor-hero">
+    <section class="monitor-hero" :class="{ 'monitor-hero-active': store.phase !== 'idle' }">
       <div>
         <div class="eyebrow"><span class="tiny-line" />一个安静的桌边提醒</div>
-        <h1>坐得舒服一些。<br /><span>专注久一点。</span></h1>
-        <p class="hero-description">不用时刻惦记姿势。找到自己的舒适参考，<br class="desktop-only" />让轻轻的提醒陪你度过每一段专注。</p>
-        <div class="hero-actions">
-          <button class="button button-primary" :disabled="store.busy || store.phase === 'calibrating'" @click="primary">
-            <Pause v-if="store.phase === 'monitoring'" :size="17" /><ScanLine v-else-if="store.phase === 'ready'" :size="17" /><Play v-else :size="16" />
+        <h1 v-if="store.phase === 'idle'">坐得舒服一些。<br /><span>专注久一点。</span></h1>
+        <h1 v-else>{{ store.demo ? '体验监测' : store.phase === 'paused' ? '监测已暂停' : store.phase === 'ready' ? '准备校准' : store.phase === 'calibrating' ? '建立参考坐姿' : store.phase === 'loading' ? '正在准备' : '此刻的坐姿' }}</h1>
+        <p v-if="store.phase === 'idle'" class="hero-description">不用时刻惦记姿势。找到自己的舒适参考，<br class="desktop-only" />让轻轻的提醒陪你度过每一段专注。</p>
+        <div v-if="store.phase === 'idle'" class="hero-actions">
+          <button class="button button-primary" @click="primary">
+            <Play :size="16" />
             {{ primaryLabel }}<ArrowUpRight v-if="store.phase === 'idle'" :size="16" />
           </button>
-          <button v-if="store.phase === 'idle'" class="text-button" @click="store.startDemo">先体验一下<ArrowRight :size="16" /></button>
-          <button v-else class="button monitor-control-stop" @click="store.endSession"><Square :size="16" />{{ store.busy ? '取消启动' : '结束监测' }}</button>
+          <button class="text-button" @click="store.startDemo">先体验一下<ArrowRight :size="16" /></button>
         </div>
         <div class="hero-note"><ShieldCheck :size="13" />本地处理 · 不保存摄像头画面</div>
       </div>
-      <div class="hero-editorial"><span class="editorial-number">01 — YOUR OWN PACE</span><div class="editorial-line" /><p>舒适的姿势，<br />从觉察开始。</p><Leaf :size="30" :stroke-width="1.15" /></div>
+      <div v-if="store.phase === 'idle'" class="hero-editorial"><span class="editorial-number">01 — YOUR OWN PACE</span><div class="editorial-line" /><p>舒适的姿势，<br />从觉察开始。</p><Leaf :size="30" :stroke-width="1.15" /></div>
     </section>
 
     <div v-if="store.error" role="alert" class="notice error-notice"><CircleHelp :size="19" /><div><strong>暂时无法开始</strong><p>{{ store.error }}</p></div><button class="text-button" @click="store.startDemo">用演示模式体验<ChevronRight :size="15" /></button></div>
@@ -67,10 +76,24 @@ const statusDescription = computed(() => {
         <h2 class="state-title">{{ store.stateLabel }}</h2>
         <p class="state-description">{{ statusDescription }}</p>
         <div class="session-time"><span>本次有效监测</span><strong>{{ clock(store.elapsed) }}</strong></div>
+        <div v-if="store.settings.headPoseEnabled && store.phase === 'monitoring' && !store.demo" class="head-pose-info" role="status">
+          <strong>人脸头姿参考 · 实验</strong>
+          <p v-if="!store.headPoseAvailable">人脸模型不可用，坐姿监测继续。</p>
+          <p v-else-if="!store.profile?.faceBaseline">请重新校准，并让人脸持续清晰入镜。</p>
+          <p v-else-if="!store.headPoseDelta">当前人脸不清晰或未匹配，暂不可判断。</p>
+          <p v-else>相对参考：俯仰 {{ store.headPoseDelta.pitch.toFixed(0) }}° · 左右转动 {{ store.headPoseDelta.yaw.toFixed(0) }}° · 歪斜 {{ store.headPoseDelta.roll.toFixed(0) }}°</p>
+          <p>角度方向及效果待真人验证，不触发提醒。</p>
+        </div>
         <div v-if="store.phase === 'calibrating'" class="sample-note">已收集 {{ store.calibrationSamples }} 个有效样本</div>
         <div v-else-if="store.phase === 'ready'" class="setup-note"><span>01</span><p>{{ store.settings.view === 'front' ? '让鼻子、双耳与双肩进入画面，舒适地坐好。' : '让摄像头看清同一侧的鼻子、耳朵与肩膀。' }}要检测含胸和上身下沉，请同时露出髋部；半身画面仍可监测头颈。</p></div>
         <div v-else-if="store.running && !store.demo" class="signal-line"><span class="status-dot" :class="store.quality >= 0.55 ? 'on' : ''" />{{ store.quality >= 0.55 ? '关键点清晰' : '等待清晰画面' }}<span>{{ store.settings.view === 'front' ? '正面参考' : '侧面参考' }}</span></div>
+        <p v-if="store.phase === 'monitoring' && !store.demo" class="sample-note">识别模型：{{ store.engine }}</p>
         <p v-if="store.phase === 'monitoring' && !store.demo" class="sample-note">{{ postureCoverage }}</p>
+        <details v-if="store.phase === 'monitoring' && !store.demo && channelDetails.length" class="channel-details">
+          <summary>查看各项检测</summary>
+          <ul><li v-for="item in channelDetails" :key="item.label"><span>{{ item.label }}</span><strong :class="item.status">{{ item.text }}<small v-if="item.score !== null"> · 点位分数 {{ item.score.toFixed(2) }}</small></strong></li></ul>
+          <p>点位分数来自模型可见度/存在度，不表示姿态判断正确率。提醒仍按综合规则判断。</p>
+        </details>
         <button v-if="store.phase === 'ready'" class="button button-primary calibration-button" @click="store.beginCalibration"><ScanLine :size="16" />开始 8 秒校准</button>
         <button v-if="store.phase === 'monitoring' && !store.demo" class="recalibrate-button" @click="store.beginCalibration"><ScanLine :size="15" />重新校准<ChevronRight :size="14" /></button>
       </aside>

@@ -61,6 +61,8 @@ export function sanitizeSettings(value: unknown): Settings {
   const flag = (key: keyof Settings): boolean => typeof v[key] === 'boolean' ? v[key] as boolean : defaults[key] as boolean
   return {
     cameraId: typeof v.cameraId === 'string' ? v.cameraId.slice(0, 256) : '',
+    modelPreference: v.modelPreference === 'full' || v.modelPreference === 'lite' ? v.modelPreference : 'auto',
+    headPoseEnabled: flag('headPoseEnabled'),
     cameraFacingMode: v.cameraFacingMode === 'environment' ? 'environment' : 'user',
     view: v.view === 'side' ? 'side' : 'front',
     showPreview: flag('showPreview'), showSkeleton: flag('showSkeleton'),
@@ -87,6 +89,10 @@ export function validCalibration(v: unknown): v is Calibration {
   const p = v as Calibration
   const b = p.baseline
   const optionalMetric = (value: unknown) => value === undefined || value === null || finite(value)
+  const boundedMetrics = (values: unknown, maximum: number) => values === undefined || !!values && typeof values === 'object'
+    && Object.entries(values).every(([key, value]) => ['drop', 'shift', 'shoulders', 'scale', 'neck', 'torso', 'headPitch', 'neckHeight', 'torsoHeight'].includes(key) && finite(value) && value >= 0 && value <= maximum)
+  const coverage = (values: unknown) => values === undefined || !!values && typeof values === 'object'
+    && Object.entries(values).every(([key, value]) => ['headPitch', 'neckHeight', 'torsoHeight', 'torso'].includes(key) && finite(value) && value >= 0 && value <= 1)
   return typeof p.id === 'string' && (p.view === 'front' || p.view === 'side')
     && typeof p.cameraId === 'string' && finite(p.aspect) && p.aspect > 0
     && finite(p.createdAt) && finite(p.sampleCount) && p.sampleCount >= 20
@@ -95,6 +101,9 @@ export function validCalibration(v: unknown): v is Calibration {
     && b.side === p.side && (p.view !== 'side' || finite(b.neck))
     && (b.neck === null || finite(b.neck)) && (b.torso === null || finite(b.torso))
     && (p.featureVersion === undefined || p.featureVersion === 2)
+    && (p.poseModel === undefined || p.poseModel === 'full' || p.poseModel === 'lite')
+    && (p.faceBaseline == null || typeof p.faceBaseline === 'object' && ['pitch', 'yaw', 'roll'].every(key => { const value = p.faceBaseline?.[key as keyof typeof p.faceBaseline]; return finite(value) && Math.abs(value) <= 85 }))
+    && boundedMetrics(p.calibrationNoise, 1000) && coverage(p.channelCoverage)
     && optionalMetric(b.headPitch) && optionalMetric(b.neckHeight) && optionalMetric(b.torsoHeight)
     && (b.headPitch == null || Math.abs(b.headPitch) <= 90)
     && (b.neckHeight == null || b.neckHeight > 0) && (b.torsoHeight == null || b.torsoHeight > 0)
@@ -108,7 +117,10 @@ export function validSession(v: unknown): v is SessionRecord {
   if (!v || typeof v !== 'object') return false
   const r = v as SessionRecord
   const states = ['normal', 'candidate_bad', 'bad', 'unknown', 'absent', 'paused', 'need_cal']
+  const version2 = r.accountingVersion === 2
   return typeof r.id === 'string' && r.id.length < 150 && r.mode === 'real'
+    && (r.accountingVersion === undefined || version2)
+    && (!version2 || finite(r.candidateSeconds) && r.candidateSeconds >= 0)
     && finite(r.startedAt) && r.startedAt > 0 && (r.endedAt === null || finite(r.endedAt))
     && validDate(r.startedAt) && (r.endedAt === null || validDate(r.endedAt) && r.endedAt >= r.startedAt)
     && (r.view === 'front' || r.view === 'side')
@@ -122,14 +134,17 @@ export function validSession(v: unknown): v is SessionRecord {
 
 function matchingTotals(record: SessionRecord): boolean {
   const sums = { goodSeconds: 0, badSeconds: 0, unknownSeconds: 0, absentSeconds: 0, pausedSeconds: 0 }
+  let candidateSeconds = 0
   for (const segment of record.segments) {
     if (segment.state === 'normal') sums.goodSeconds += segment.seconds
-    if (segment.state === 'bad' || segment.state === 'candidate_bad') sums.badSeconds += segment.seconds
+    if (segment.state === 'bad' || segment.state === 'candidate_bad' && record.accountingVersion !== 2) sums.badSeconds += segment.seconds
+    if (segment.state === 'candidate_bad') candidateSeconds += segment.seconds
     if (segment.state === 'unknown' || segment.state === 'need_cal') sums.unknownSeconds += segment.seconds
     if (segment.state === 'absent') sums.absentSeconds += segment.seconds
     if (segment.state === 'paused') sums.pausedSeconds += segment.seconds
   }
   return (Object.keys(sums) as (keyof typeof sums)[]).every(key => Math.abs(record[key] - sums[key]) < 1)
+    && (record.accountingVersion !== 2 || Math.abs((record.candidateSeconds ?? 0) - candidateSeconds) < 1)
 }
 
 export async function importHistory(text: string): Promise<number> {

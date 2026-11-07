@@ -5,7 +5,7 @@ import ts from 'typescript'
 
 const source = readFileSync(new URL('../src/domain/posture.ts', import.meta.url), 'utf8')
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-const { observe, makeCalibration, classify, smoothFeatures } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'))
+const { observe, makeCalibration, classify, smoothFeatures, normalCoverage, advancePostureHold, resumePostureHold, acceptFrameTimestamp, checkCalibrationCoverage } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'))
 const settings = { sensitivity: 1 }
 const point = (x, y, confidence = .95) => ({ x, y, z: 0, visibility: confidence, presence: confidence })
 function profileFrame(index = 0, side = 'right') {
@@ -25,6 +25,89 @@ const samples = (side = 'right') => Array.from({ length: 60 }, (_, i) => {
   const result = observe(profileFrame(i, side), 640, 480, 'side')
   assert.equal(result.valid, true)
   return result.features
+})
+
+test('a missing calibrated pitch cannot confirm recovery, while other deviations still report', () => {
+  const baseline = { side: 'left', neck: 0, torso: null, drop: -.5, shift: 0, shoulders: 0, scale: .3, headPitch: 0, neckHeight: null, torsoHeight: null }
+  const profile = { view: 'front', baseline }
+  const missing = { ...baseline, headPitch: null }
+  const result = classify(missing, profile, settings)
+  assert.equal(result.bad, false)
+  assert.equal(result.unknown, true)
+  assert.equal(result.channels.headPitch.status, 'unknown')
+  assert.equal(result.channels.torsoHeight.status, 'disabled')
+  assert.match(result.reason, /无法确认姿态已恢复/)
+  assert.equal(classify({ ...missing, shoulders: 18 }, profile, settings).bad, true)
+  assert.equal(classify({ ...missing, shoulders: 18 }, profile, settings).channels.shoulderTilt.status, 'bad')
+  assert.equal(classify({ ...baseline, headPitch: 0 }, profile, settings).unknown, undefined)
+  assert.equal(classify({ ...baseline, headPitch: 0 }, profile, settings).channels.headPitch.status, 'normal')
+})
+
+test('normal status describes only the posture channels actually covered', () => {
+  const baseline = { side: 'left', neck: 0, torso: null, drop: -.5, shift: 0, shoulders: 0, scale: .3, headPitch: 0, neckHeight: null, torsoHeight: 1.5 }
+  const profile = { view: 'front', baseline }
+  const covered = classify({ ...baseline }, profile, settings)
+  assert.match(normalCoverage(covered.channels), /头部俯仰.*躯干参考/)
+  const hiddenHip = classify({ ...baseline, torsoHeight: null }, profile, settings)
+  assert.equal(hiddenHip.bad, false)
+  assert.match(normalCoverage(hiddenHip.channels), /躯干暂不可判断/)
+  const noHipReference = classify({ ...baseline, torsoHeight: null }, { ...profile, baseline: { ...baseline, torsoHeight: null } }, settings)
+  assert.match(normalCoverage(noHipReference.channels), /躯干检测未启用/)
+})
+
+test('switching posture reason starts a fresh hold instead of borrowing the previous one', () => {
+  const first = advancePostureHold({ reason: null, since: null }, '低头', 1000, 6, false)
+  const switched = advancePostureHold(first, '侧倾', 6500, 6, false)
+  assert.equal(switched.confirmed, false)
+  assert.equal(switched.since, 6500)
+  const confirmed = advancePostureHold(switched, '侧倾', 12500, 6, false)
+  assert.equal(confirmed.confirmed, true)
+  const changedAfterConfirmation = advancePostureHold(confirmed, '头部前伸', 13000, 6, true)
+  assert.equal(changedAfterConfirmation.confirmed, false)
+})
+
+test('a brief landmark gap pauses hold time but a long gap resets it', () => {
+  assert.equal(resumePostureHold(1000, 4000, 4500), 1500)
+  assert.equal(resumePostureHold(1000, 4000, 4900), null)
+  assert.equal(advancePostureHold({ reason: '低头', since: 1500 }, '低头', 6500, 6, false).confirmed, false)
+  assert.equal(advancePostureHold({ reason: '低头', since: 1500 }, '低头', 7500, 6, false).confirmed, true)
+})
+
+test('only recent, monotonically captured frames can update posture', () => {
+  assert.equal(acceptFrameTimestamp(1000, 1200, -Infinity), true)
+  assert.equal(acceptFrameTimestamp(1000, 1201, 1000), false)
+  assert.equal(acceptFrameTimestamp(900, 1200, 1000), false)
+  assert.equal(acceptFrameTimestamp(1100, 2700, 1000), false)
+  assert.equal(acceptFrameTimestamp(1400, 1200, 1000), false)
+  assert.equal(acceptFrameTimestamp(NaN, 1200, 1000), false)
+})
+
+test('a hidden hip removes torso point quality without lowering visible head and shoulder quality', () => {
+  const points = profileFrame()
+  const result = observe(points, 640, 480, 'side')
+  assert.equal(result.valid, true)
+  assert.ok(result.channelQuality.neckAngle >= .8)
+  assert.equal(result.channelQuality.torsoAngle, undefined)
+  assert.equal(result.channelQuality.torsoHeight, undefined)
+  assert.ok(result.quality >= .8)
+})
+
+test('calibration requires sustained samples across time, not a last-second burst', () => {
+  const stable = Array.from({ length: 31 }, (_, i) => i * 220)
+  assert.equal(checkCalibrationCoverage(stable).valid, true)
+  assert.match(checkCalibrationCoverage(Array.from({ length: 30 }, (_, i) => 7000 + i * 30)).reason, /持续时间不足/)
+  assert.match(checkCalibrationCoverage([...stable.slice(0, 15), ...stable.slice(15).map(t => t + 2000)]).reason, /中断较久/)
+  assert.equal(checkCalibrationCoverage(stable.slice(0, 19)).valid, false)
+})
+
+test('frontal calibration rejects unstable horizontal position and apparent size', () => {
+  const baseline = { side: 'left', neck: null, torso: null, drop: -.5, shift: 0, shoulders: 0, scale: .3, headPitch: null, neckHeight: null, torsoHeight: null }
+  const stable = Array.from({ length: 30 }, () => ({ ...baseline }))
+  assert.doesNotThrow(() => makeCalibration(stable, 'front', 'camera', 4 / 3))
+  const movingSideways = stable.map((s, i) => ({ ...s, shift: i % 2 ? .2 : -.2 }))
+  assert.throws(() => makeCalibration(movingSideways, 'front', 'camera', 4 / 3), /左右移动/)
+  const movingCloser = stable.map((s, i) => ({ ...s, scale: i % 2 ? .36 : .24 }))
+  assert.throws(() => makeCalibration(movingCloser, 'front', 'camera', 4 / 3), /身体大小变化/)
 })
 
 test('half-body side view calibrates with overlapping shoulders and no visible hips, on either side', () => {

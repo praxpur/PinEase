@@ -16,6 +16,7 @@ function render() {
   const styles = getComputedStyle(document.documentElement)
   const color = (name: string) => styles.getPropertyValue('--chart-' + name).trim()
   const options: EChartsCoreOption = {
+    animation: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     animationDuration: 500,
     textStyle: { fontFamily: 'Arial, Microsoft YaHei, sans-serif', fontSize: 11, color: color('text') },
     tooltip: { trigger: 'axis', backgroundColor: color('surface'), borderColor: color('border'), padding: 12, textStyle: { color: color('text'), fontSize: 12 } },
@@ -42,5 +43,12 @@ onMounted(() => {
 onBeforeUnmount(() => { observer?.disconnect(); chart?.dispose() })
 </script>
 
-<template><div ref="element" class="trend-chart" role="img" :aria-label="variant === 'ratio' ? '良好坐姿占比趋势' : '每日有效监测时长趋势'" /></template>
+<template>
+  <div ref="element" class="trend-chart" role="img" :aria-label="variant === 'ratio' ? '参考坐姿占比趋势，详细数值见下方数据表' : '每日有效监测时长趋势，详细数值见下方数据表'" />
+  <details class="chart-data"><summary>查看每日数据表</summary>
+    <table><caption>{{ variant === 'ratio' ? '每天的参考坐姿占比' : '每天的有效监测时长' }}</caption><thead><tr><th scope="col">日期</th><th v-if="variant !== 'ratio'" scope="col">参考坐姿</th><th v-if="variant !== 'ratio'" scope="col">偏离参考</th><th scope="col">占比</th></tr></thead>
+      <tbody><tr v-for="day in stats" :key="day.date"><th scope="row">{{ day.date }}</th><td v-if="variant !== 'ratio'">{{ Math.round(day.goodSeconds / 60) }} 分钟</td><td v-if="variant !== 'ratio'">{{ Math.round(day.badSeconds / 60) }} 分钟</td><td>{{ day.ratio === null ? '无有效记录' : Math.round(day.ratio * 100) + '%' }}</td></tr></tbody>
+    </table>
+  </details>
+</template>
 
