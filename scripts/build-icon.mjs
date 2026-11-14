@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -30,4 +30,14 @@ for (const [index, size] of sizes.entries()) {
 }
 
 await writeFile(path.join(root, 'public', 'favicon.ico'), icon)
-console.log(`Updated public/favicon.ico from public/icon.svg (${sizes.join(', ')}px)`)
+
+const tauriIconsDir = path.join(root, 'src-tauri', 'icons')
+await mkdir(tauriIconsDir, { recursive: true })
+await Promise.all([
+  writeFile(path.join(tauriIconsDir, '32x32.png'), images[sizes.indexOf(32)]),
+  writeFile(path.join(tauriIconsDir, '128x128.png'), images[sizes.indexOf(128)]),
+  writeFile(path.join(tauriIconsDir, '128x128@2x.png'), images[sizes.indexOf(256)]),
+  writeFile(path.join(tauriIconsDir, 'icon.ico'), icon),
+])
+
+console.log(`Updated public/favicon.ico and src-tauri/icons from public/icon.svg (${sizes.join(', ')}px)`)

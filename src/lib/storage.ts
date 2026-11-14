@@ -77,6 +77,13 @@ export function sanitizeSettings(value: unknown): Settings {
     soundRepeats: Math.round(bounded(v.soundRepeats, 1, 3, defaults.soundRepeats)),
     notificationsEnabled: flag('notificationsEnabled'), focusReminder: flag('focusReminder'),
     blinkEnabled: flag('blinkEnabled'), eyeCareAuto: flag('eyeCareAuto'), lowLightBoost: flag('lowLightBoost'), fps: bounded(v.fps, 5, 20, defaults.fps),
+    pomodoroEnabled: flag('pomodoroEnabled'),
+    pomodoroFocusMinutes: Math.round(bounded(v.pomodoroFocusMinutes, 1, 90, defaults.pomodoroFocusMinutes)),
+    pomodoroShortBreakMinutes: Math.round(bounded(v.pomodoroShortBreakMinutes, 1, 30, defaults.pomodoroShortBreakMinutes)),
+    pomodoroLongBreakMinutes: Math.round(bounded(v.pomodoroLongBreakMinutes, 5, 60, defaults.pomodoroLongBreakMinutes)),
+    pomodoroLongInterval: Math.round(bounded(v.pomodoroLongInterval, 2, 8, defaults.pomodoroLongInterval)),
+    pomodoroAutoStartBreak: flag('pomodoroAutoStartBreak'),
+    pomodoroAutoStartFocus: flag('pomodoroAutoStartFocus'),
   }
 }
 
@@ -90,23 +97,24 @@ export function validCalibration(v: unknown): v is Calibration {
   const b = p.baseline
   const optionalMetric = (value: unknown) => value === undefined || value === null || finite(value)
   const boundedMetrics = (values: unknown, maximum: number) => values === undefined || !!values && typeof values === 'object'
-    && Object.entries(values).every(([key, value]) => ['drop', 'shift', 'shoulders', 'scale', 'neck', 'torso', 'headPitch', 'neckHeight', 'torsoHeight'].includes(key) && finite(value) && value >= 0 && value <= maximum)
+    && Object.entries(values).every(([key, value]) => ['drop', 'shift', 'shoulders', 'scale', 'neck', 'headPitch', 'headTilt', 'neckHeight'].includes(key) && finite(value) && value >= 0 && value <= maximum)
   const coverage = (values: unknown) => values === undefined || !!values && typeof values === 'object'
-    && Object.entries(values).every(([key, value]) => ['headPitch', 'neckHeight', 'torsoHeight', 'torso'].includes(key) && finite(value) && value >= 0 && value <= 1)
+    && Object.entries(values).every(([key, value]) => ['headPitch', 'headTilt', 'neckHeight'].includes(key) && finite(value) && value >= 0 && value <= 1)
   return typeof p.id === 'string' && (p.view === 'front' || p.view === 'side')
     && typeof p.cameraId === 'string' && finite(p.aspect) && p.aspect > 0
     && finite(p.createdAt) && finite(p.sampleCount) && p.sampleCount >= 20
     && (p.side === 'left' || p.side === 'right') && !!b
     && finite(b.drop) && finite(b.shift) && finite(b.shoulders) && finite(b.scale)
     && b.side === p.side && (p.view !== 'side' || finite(b.neck))
-    && (b.neck === null || finite(b.neck)) && (b.torso === null || finite(b.torso))
+    && (b.neck === null || finite(b.neck))
     && (p.featureVersion === undefined || p.featureVersion === 2)
     && (p.poseModel === undefined || p.poseModel === 'full' || p.poseModel === 'lite')
     && (p.faceBaseline == null || typeof p.faceBaseline === 'object' && ['pitch', 'yaw', 'roll'].every(key => { const value = p.faceBaseline?.[key as keyof typeof p.faceBaseline]; return finite(value) && Math.abs(value) <= 85 }))
     && boundedMetrics(p.calibrationNoise, 1000) && coverage(p.channelCoverage)
-    && optionalMetric(b.headPitch) && optionalMetric(b.neckHeight) && optionalMetric(b.torsoHeight)
+    && optionalMetric(b.headPitch) && optionalMetric(b.headTilt) && optionalMetric(b.neckHeight)
     && (b.headPitch == null || Math.abs(b.headPitch) <= 90)
-    && (b.neckHeight == null || b.neckHeight > 0) && (b.torsoHeight == null || b.torsoHeight > 0)
+    && (b.headTilt == null || Math.abs(b.headTilt) <= 90)
+    && (b.neckHeight == null || b.neckHeight > 0)
 }
 
 function validDate(value: unknown): value is number {

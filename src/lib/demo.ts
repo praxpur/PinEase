@@ -1,7 +1,7 @@
 import type { Calibration, Features, SessionRecord } from '@/domain/types'
 import { dayRange } from './format'
 
-export const DEMO_FEATURES: Features = { neck: 5, torso: 2, drop: -0.7, shift: 0, shoulders: 0, scale: 0.32, side: 'left' }
+export const DEMO_FEATURES: Features = { neck: 5, drop: -0.7, shift: 0, shoulders: 0, scale: 0.32, side: 'left' }
 
 export function demoCalibration(): Calibration {
   return { id: 'demo', view: 'front', cameraId: 'demo', createdAt: Date.now(), aspect: 4 / 3, side: 'left', sampleCount: 40, baseline: { ...DEMO_FEATURES } }

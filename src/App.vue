@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
-import { ArrowUpRight, X, ShieldCheck, Expand, Leaf, Eye } from 'lucide-vue-next'
+import { ArrowUpRight, X, ShieldCheck, Expand, Leaf, Eye, Minus, Square } from 'lucide-vue-next'
 import { useMonitorStore } from '@/stores/monitor'
 import { clock } from '@/lib/format'
 import AppDialog from '@/components/ui/AppDialog.vue'
 const store = useMonitorStore()
+const showWindowControls = window.pineaseDesktop?.windowControls === true
 const desktopUnsubscribe = ref<(() => void) | null>(null)
 const privacy = ref(false)
 const installPrompt = shallowInstall()
@@ -27,6 +28,9 @@ onMounted(() => {
 })
 onBeforeUnmount(() => desktopUnsubscribe.value?.())
 async function install() { await installPrompt.value?.prompt(); installPrompt.value = null }
+function minimizeDesktopWindow() { window.pineaseDesktop?.minimizeWindow?.() }
+function toggleMaximizeDesktopWindow() { window.pineaseDesktop?.toggleMaximizeWindow?.() }
+function closeDesktopWindow() { window.pineaseDesktop?.closeWindow?.() }
 async function fullscreen() {
   try { await document.documentElement.requestFullscreen() } catch { store.announce('继续在页面里休息', '浏览器没有开启全屏。') }
 }
@@ -34,8 +38,15 @@ async function fullscreen() {
 
 <template>
   <a href="#main-content" class="skip-link">跳转到内容</a>
+  <div v-if="showWindowControls" class="desktop-window-bar" data-tauri-drag-region>
+    <div class="desktop-window-controls" role="group" aria-label="窗口控制">
+      <button type="button" class="desktop-win-btn" title="最小化" aria-label="最小化" @click="minimizeDesktopWindow"><Minus :size="13" /></button>
+      <button type="button" class="desktop-win-btn" title="最大化或还原" aria-label="最大化或还原" @click="toggleMaximizeDesktopWindow"><Square :size="11" /></button>
+      <button type="button" class="desktop-win-btn close" title="最小化到托盘" aria-label="最小化到托盘" @click="closeDesktopWindow"><X :size="14" /></button>
+    </div>
+  </div>
   <div class="app-shell">
-    <header class="site-header">
+    <header class="site-header" :data-tauri-drag-region="store.desktopRuntime ? '' : undefined">
       <RouterLink to="/" class="brand" aria-label="PinEase 青松坐姿首页">
         <svg width="28" height="36" viewBox="0 0 28 36" fill="none" aria-hidden="true"><path d="M14 32V10M14 4L5 17H10L3 26H25L18 17H23L14 4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>
         <span>PinEase<small>青松坐姿</small></span>

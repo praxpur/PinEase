@@ -13,6 +13,8 @@ node_modules
 dist
 release
 .electron-cache
+src-tauri/target
+src-tauri/gen
 dist-ssr
 coverage
 *.local

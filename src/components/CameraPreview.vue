@@ -7,7 +7,7 @@ const store = useMonitorStore()
 const video = ref<HTMLVideoElement | null>(null)
 const canvas = ref<HTMLCanvasElement | null>(null)
 const hasPreview = computed(() => !!store.stream && store.settings.showPreview)
-const connections = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [7, 11], [8, 12]]
+const connections = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [7, 11], [8, 12]]
 let resize: ResizeObserver | null = null
 
 async function changeView(event: Event) {
@@ -57,7 +57,7 @@ function draw() {
     ctx.lineTo(ox + b.x * w, oy + b.y * h)
     ctx.stroke()
   }
-  for (const i of [0, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24]) {
+  for (const i of [0, 7, 8, 11, 12, 13, 14, 15, 16]) {
     const p = points[i]
     if (!p || (p.visibility ?? 1) < 0.55) continue
     ctx.beginPath(); ctx.arc(ox + p.x * w, oy + p.y * h, 3, 0, Math.PI * 2); ctx.fill()

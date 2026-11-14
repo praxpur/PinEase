@@ -1,3 +1,4 @@
+import './lib/desktop'
 import './lib/theme'
 import './assets/app.css'
 

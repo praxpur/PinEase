@@ -9,6 +9,18 @@ import { calibrateHeadPose } from '@/lib/head-pose'
 import { checkNeckExerciseMatch, summarizePerformance, type LightingReport, type NeckExerciseStep } from '@/lib/lighting'
 import { BlinkTracker } from '@/domain/blink'
 import { detectInversion, ALIEN_MESSAGE, InversionTracker } from '@/domain/fun'
+import {
+  advancePomodoroState,
+  createPomodoroState,
+  pausePomodoroState,
+  pomodoroConfigFromSettings,
+  resetPomodoroState,
+  selectPomodoroPhase,
+  startPomodoroState,
+  tickPomodoroState,
+  type PomodoroPhase,
+  type PomodoroState,
+} from '@/domain/pomodoro'
 import { playReminder } from '@/lib/audio'
 import { cameraError, VisionCamera } from '@/lib/vision'
 
@@ -19,6 +31,10 @@ export const useMonitorStore = defineStore('monitor', () => {
   const phase = ref<Phase>('idle')
   const state = ref<PostureState>('need_cal')
   const reason = ref('打开摄像头，建立你的参考坐姿')
+  const displayState = ref<PostureState>('need_cal')
+  const displayReason = ref('打开摄像头，建立你的参考坐姿')
+  const displayChannels = shallowRef<PostureVerdict['channels'] | null>(null)
+  const displayQuality = ref(0)
   const error = ref('')
   const storageWarning = ref('')
   const initialized = ref(false)
@@ -65,6 +81,10 @@ export const useMonitorStore = defineStore('monitor', () => {
   const restRemaining = ref(0)
   const restKind = ref<ReminderKind>('break')
   const desktopRuntime = ref(window.pineaseDesktop?.isDesktop === true)
+  const pomodoro = ref<PomodoroState>(createPomodoroState(pomodoroConfigFromSettings(DEFAULT_SETTINGS)))
+  const pomodoroOnBreak = computed(() => pomodoro.value.status === 'running' && pomodoro.value.phase !== 'focus')
+  let pomodoroTimer: number | null = null
+  let pomodoroLastTick = 0
   const eyeCareActive = ref(false)
   const lighting = ref<LightingReport>({ luma: 128, centerLuma: 128, edgeLuma: 128, contrast: 32, status: 'normal', gamma: 1, boostApplied: false })
   const latencyWindow = ref<number[]>([])
@@ -74,6 +94,10 @@ export const useMonitorStore = defineStore('monitor', () => {
   const exerciseActive = ref(false)
   const exerciseStep = ref<NeckExerciseStep>('left')
   const exerciseProgress = ref(0)
+  const debugMode = ref(false)
+  const testActionTag = ref('自由调试')
+  const telemetryCount = ref(0)
+  let lastTelemetryAt = -Infinity
   let performanceWarned = false
   let cameraPreview: HTMLVideoElement | null = null
 
@@ -88,10 +112,19 @@ export const useMonitorStore = defineStore('monitor', () => {
   let lastSmooth = 0
   let badSince: number | null = null
   let badReason: string | null = null
+  let badReasonCandidate: string | null = null
+  let badReasonCandidateSince: number | null = null
   let badGapStarted: number | null = null
   let badConfirmedBeforeGap = false
   let goodSince: number | null = null
   let absentSince: number | null = null
+  let pendingDisplay: { state: PostureState; reason: string; since: number } | null = null
+  let lastDisplaySwitchAt = -Infinity
+  let lastChannelSyncAt = -Infinity
+  let lowQualitySince: number | null = null
+  const lastValidVertical: { headPitch: { value: number; at: number } | null; headTilt: { value: number; at: number } | null; neckHeight: { value: number; at: number } | null } = {
+    headPitch: null, headTilt: null, neckHeight: null,
+  }
   let calibrationStart = 0
   let calibrationBuffer: Features[] = []
   let calibrationTimestamps: number[] = []
@@ -117,13 +150,68 @@ export const useMonitorStore = defineStore('monitor', () => {
     ? [session.value, ...sessions.value.filter(s => s.id !== session.value?.id)] : sessions.value)
   const today = computed(() => dailyStats(records.value, 1)[0]!)
   const elapsed = computed(() => session.value ? session.value.goodSeconds + session.value.badSeconds : 0)
-  const stateLabel = computed(() => phase.value === 'idle' ? '还没有开始' : phase.value === 'loading' ? '正在准备摄像头' : STATE_LABELS[state.value])
+  const stateLabel = computed(() => phase.value === 'idle' ? '还没有开始' : phase.value === 'loading' ? '正在准备摄像头' : STATE_LABELS[displayState.value])
   const stateColor = computed(() => {
-    if (state.value === 'normal' && phase.value === 'monitoring') return 'green'
-    if (state.value === 'bad') return 'amber'
-    if (state.value === 'candidate_bad') return 'soft'
+    if (displayState.value === 'normal' && phase.value === 'monitoring') return 'green'
+    if (displayState.value === 'bad') return 'amber'
+    if (displayState.value === 'candidate_bad') return 'soft'
     return 'muted'
   })
+
+  function syncDisplay(now = performance.now(), immediate = false) {
+    if (immediate || demo.value || phase.value !== 'monitoring') {
+      displayState.value = state.value
+      displayReason.value = reason.value
+      displayChannels.value = channels.value
+      displayQuality.value = quality.value
+      pendingDisplay = null
+      lastDisplaySwitchAt = now
+      lastChannelSyncAt = now
+      lowQualitySince = null
+      return
+    }
+    if (quality.value >= 0.55) {
+      lowQualitySince = null
+      displayQuality.value = quality.value
+    } else {
+      lowQualitySince ??= now
+      if (now - lowQualitySince >= 1500) displayQuality.value = quality.value
+    }
+    if (state.value === displayState.value && reason.value === displayReason.value) {
+      pendingDisplay = null
+      if (now - lastChannelSyncAt >= 1000 || displayChannels.value === null) {
+        displayChannels.value = channels.value
+        lastChannelSyncAt = now
+      }
+      return
+    }
+    if (!pendingDisplay || pendingDisplay.state !== state.value || pendingDisplay.reason !== reason.value) {
+      pendingDisplay = { state: state.value, reason: reason.value, since: now }
+    }
+    const holdMs = now - pendingDisplay.since
+    const dwellMs = now - lastDisplaySwitchAt
+    let minHoldMs = 1600
+    let minDwellMs = 2500
+    if ((state.value === 'bad' || state.value === 'absent') && displayState.value !== state.value) {
+      minHoldMs = 0
+      minDwellMs = 0
+    } else if (displayState.value === 'normal') {
+      minHoldMs = 1800
+      minDwellMs = 1500
+    } else if (state.value === 'normal') {
+      const immediateNormal = displayState.value === 'bad' || displayState.value === 'absent' || displayReason.value === '等待识别你的坐姿'
+      minHoldMs = immediateNormal ? 0 : 900
+      minDwellMs = immediateNormal ? 0 : 2200
+    }
+    if (holdMs >= minHoldMs && dwellMs >= minDwellMs) {
+      displayState.value = state.value
+      displayReason.value = reason.value
+      displayChannels.value = channels.value
+      pendingDisplay = null
+      lastDisplaySwitchAt = now
+      lastChannelSyncAt = now
+    }
+  }
 
   function toggleEyeCare(force?: boolean) {
     eyeCareActive.value = typeof force === 'boolean' ? force : !eyeCareActive.value
@@ -171,6 +259,9 @@ export const useMonitorStore = defineStore('monitor', () => {
       settings.value = data.settings
       profiles.value = data.calibrations
       sessions.value = data.sessions
+      if (pomodoro.value.status === 'idle') {
+        pomodoro.value = createPomodoroState(pomodoroConfigFromSettings(settings.value))
+      }
     } catch { storageWarning.value = '浏览器存储暂不可用，本次记录只会保留在当前页面。你仍可以导出备份。' }
     await refreshDevices()
     document.addEventListener('visibilitychange', () => {
@@ -215,8 +306,15 @@ export const useMonitorStore = defineStore('monitor', () => {
     lastSmooth = 0
     badSince = goodSince = absentSince = null
     badReason = null
+    badReasonCandidate = null
+    badReasonCandidateSince = null
     badGapStarted = null
     badConfirmedBeforeGap = false
+    pendingDisplay = null
+    lastDisplaySwitchAt = -Infinity
+    lastChannelSyncAt = -Infinity
+    lowQualitySince = null
+    lastValidVertical.headPitch = lastValidVertical.headTilt = lastValidVertical.neckHeight = null
     blinkTracker.reset()
     blinkFaceMissing = true
     blinkCount.value = blinkObservedSeconds.value = 0
@@ -286,9 +384,13 @@ export const useMonitorStore = defineStore('monitor', () => {
       reason.value = '等待可靠的摄像头画面'
       badSince = goodSince = null
       badReason = null
+      badReasonCandidate = null
+      badReasonCandidateSince = null
       badGapStarted = null
       badConfirmedBeforeGap = false
+      syncDisplay(now, true)
     }
+    syncDisplay(now)
     addSegment(current, reason.value, dt)
     if (current === 'normal' || current === 'bad' || current === 'candidate_bad') continuousSeconds.value += dt
     if (current === 'absent') continuousSeconds.value = 0
@@ -296,8 +398,8 @@ export const useMonitorStore = defineStore('monitor', () => {
       calibrationProgress.value = Math.min(100, (now - calibrationStart) / 80)
       if (now - calibrationStart >= 8000) finishCalibration()
     }
-    if (phase.value === 'monitoring' && current === 'bad') remind('posture', reason.value)
-    if (settings.value.breakEnabled && continuousSeconds.value >= nextBreak && phase.value === 'monitoring') {
+    if (phase.value === 'monitoring' && current === 'bad' && !pomodoroOnBreak.value) remind('posture', reason.value)
+    if (settings.value.breakEnabled && continuousSeconds.value >= nextBreak && phase.value === 'monitoring' && !pomodoroOnBreak.value) {
       remind('break', '专注了一段时间，起来走走吧')
       nextBreak = continuousSeconds.value + settings.value.sitMinutes * 60
     }
@@ -349,6 +451,7 @@ export const useMonitorStore = defineStore('monitor', () => {
       phase.value = profile.value && !profileMismatch ? 'monitoring' : 'ready'
       state.value = phase.value === 'monitoring' ? 'unknown' : 'need_cal'
       reason.value = updatedFeatures ? '检测特征已更新，请重新校准' : changedModel ? '姿态模型已切换，请重新校准' : profileMismatch ? '画面比例变了，请重新校准' : profile.value ? '等待识别你的坐姿' : '准备好后，花 8 秒建立参考坐姿'
+      syncDisplay(performance.now(), true)
       if (!session.value) createSession('real')
       else lastTick = performance.now()
       if (result.warning) announce('坐姿监测已准备好', result.warning)
@@ -362,6 +465,7 @@ export const useMonitorStore = defineStore('monitor', () => {
       error.value = cameraError(failure)
       phase.value = resuming && session.value ? 'paused' : 'idle'
       state.value = resuming ? 'paused' : 'need_cal'
+      syncDisplay(performance.now(), true)
     }
   }
 
@@ -392,6 +496,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     const f = { ...DEMO_FEATURES, drop: demoPose.value === 'bad' ? -0.4 : -0.7 }
     feature.value = f
     updatePosture(f, demoCalibration(), now)
+    syncDisplay(now, true)
   }
 
   function updatePosture(f: Features, reference: Calibration, now: number, channelQuality?: import('@/domain/types').Observation['channelQuality']) {
@@ -417,17 +522,35 @@ export const useMonitorStore = defineStore('monitor', () => {
     }
     if (verdict.bad) {
       goodSince = null
-      const hold = advancePostureHold({ reason: badReason, since: badSince }, verdict.reason, now, settings.value.holdSeconds, wasConfirmed)
+      let effectiveReason = verdict.reason
+      if (badReason !== null && verdict.reason !== badReason) {
+        if (badReasonCandidate !== verdict.reason) {
+          badReasonCandidate = verdict.reason
+          badReasonCandidateSince = now
+        }
+        if (now - (badReasonCandidateSince ?? now) < 1200) {
+          effectiveReason = badReason
+        } else {
+          badReasonCandidate = null
+          badReasonCandidateSince = null
+        }
+      } else {
+        badReasonCandidate = null
+        badReasonCandidateSince = null
+      }
+      const hold = advancePostureHold({ reason: badReason, since: badSince }, effectiveReason, now, settings.value.holdSeconds, wasConfirmed)
       badReason = hold.reason
       badSince = hold.since
       badConfirmedBeforeGap = false
       state.value = hold.confirmed ? 'bad' : 'candidate_bad'
       if (previousState !== 'candidate_bad' && state.value === 'candidate_bad') evalMetrics.value.candidateTransitions++
       if (previousState !== 'bad' && state.value === 'bad') evalMetrics.value.confirmedTransitions++
-      reason.value = verdict.reason
+      reason.value = effectiveReason
     } else {
       badSince = null
       badReason = null
+      badReasonCandidate = null
+      badReasonCandidateSince = null
       badConfirmedBeforeGap = false
       if (wasConfirmed) {
         goodSince ??= now
@@ -438,6 +561,72 @@ export const useMonitorStore = defineStore('monitor', () => {
       goodSince = null
       if (restOpen.value && restKind.value === 'posture') closeRest()
     }
+  }
+
+  function emitTelemetry(points: Landmark[], now: number, result: import('@/domain/types').Observation) {
+    if (demo.value || typeof fetch !== 'function' || now - lastTelemetryAt < 180) return
+    lastTelemetryAt = now
+    telemetryCount.value++
+    const round = (n: number | null | undefined, digits = 3) => typeof n === 'number' && Number.isFinite(n) ? Number(n.toFixed(digits)) : null
+    const compactFeatures = (f: Features | null | undefined) => f ? {
+      headPitch: round(f.headPitch, 2),
+      headTilt: round(f.headTilt, 2),
+      neckHeight: round(f.neckHeight, 3),
+      drop: round(f.drop, 3),
+      shift: round(f.shift, 3),
+      shoulders: round(f.shoulders, 2),
+      scale: round(f.scale, 3),
+      neck: round(f.neck, 2),
+      side: f.side,
+    } : null
+    const compactPoint = (p: Landmark | undefined) => p ? {
+      x: round(p.x, 4),
+      y: round(p.y, 4),
+      q: round(Math.min(p.visibility ?? 1, p.presence ?? 1), 2),
+    } : null
+    const payload = {
+      wallTime: Date.now(),
+      frameMs: Math.round(now),
+      phase: phase.value,
+      view: settings.value.view,
+      actionTag: testActionTag.value,
+      valid: result.valid,
+      obsReason: result.reason,
+      quality: round(result.quality, 2),
+      state: state.value,
+      reason: reason.value,
+      displayState: displayState.value,
+      displayReason: displayReason.value,
+      deviation: round(deviation.value, 2),
+      raw: compactFeatures(result.features),
+      smoothed: compactFeatures(feature.value),
+      baseline: compactFeatures(profile.value?.baseline),
+      headPoseDelta: headPoseDelta.value ? {
+        pitch: round(headPoseDelta.value.pitch, 2),
+        yaw: round(headPoseDelta.value.yaw, 2),
+        roll: round(headPoseDelta.value.roll, 2),
+      } : null,
+      points: {
+        nose: compactPoint(points[0]),
+        leftEar: compactPoint(points[7]),
+        rightEar: compactPoint(points[8]),
+        leftShoulder: compactPoint(points[11]),
+        rightShoulder: compactPoint(points[12]),
+      },
+    }
+    void fetch('/__telemetry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {})
+  }
+
+  async function clearTelemetryLog() {
+    telemetryCount.value = 0
+    if (typeof fetch === 'function') {
+      await fetch('/__telemetry', { method: 'DELETE' }).catch(() => {})
+    }
+    announce('实测日志已清空', '可以开始按顺序做出各个动作。')
   }
 
   function handleObservation(points: Landmark[], now: number, width: number, height: number) {
@@ -462,6 +651,8 @@ export const useMonitorStore = defineStore('monitor', () => {
       reason.value = result.reason
       if (state.value === 'absent') continuousSeconds.value = 0
       if (restOpen.value && restKind.value === 'posture') closeRest()
+      syncDisplay(now)
+      emitTelemetry(points, now, result)
       return
     }
     evalMetrics.value.validFrames++
@@ -473,13 +664,26 @@ export const useMonitorStore = defineStore('monitor', () => {
       const leftSamples = settings.value.view === 'side' ? calibrationBuffer.filter(sample => sample.side === 'left').length : 0
       calibrationSamples.value = settings.value.view === 'side' ? Math.max(leftSamples, calibrationBuffer.length - leftSamples) : calibrationBuffer.length
       feature.value = result.features
+      syncDisplay(now, true)
+      emitTelemetry(points, now, result)
       return
     }
-    if (phase.value === 'ready' || !profile.value || profileMismatch) { state.value = 'need_cal'; return }
+    if (phase.value === 'ready' || !profile.value || profileMismatch) { state.value = 'need_cal'; syncDisplay(now, true); emitTelemetry(points, now, result); return }
+    const stabilizedFeatures: Features = { ...result.features }
+    for (const key of ['headPitch', 'headTilt', 'neckHeight'] as const) {
+      const val = stabilizedFeatures[key]
+      if (typeof val === 'number' && Number.isFinite(val)) {
+        lastValidVertical[key] = { value: val, at: now }
+      } else if (lastValidVertical[key] && now - lastValidVertical[key]!.at <= 1000) {
+        stabilizedFeatures[key] = lastValidVertical[key]!.value
+      }
+    }
     const elapsed = lastSmooth ? (now - lastSmooth) / 1000 : 10
-    feature.value = smoothFeatures(feature.value, result.features, elapsed)
+    feature.value = smoothFeatures(feature.value, stabilizedFeatures, elapsed)
     lastSmooth = now
     updatePosture(feature.value, profile.value, now, result.channelQuality)
+    syncDisplay(now)
+    emitTelemetry(points, now, result)
   }
 
   function onFrame(frame: VisionFrame) {
@@ -496,6 +700,7 @@ export const useMonitorStore = defineStore('monitor', () => {
       phase.value = 'ready'
       state.value = 'need_cal'
       reason.value = '画面比例变了，请重新校准'
+      syncDisplay(frame.timestamp, true)
       announce('需要重新校准', '摄像头方向或画面比例已变化，请重新校准后继续监测。')
     }
     inferenceMs.value = frame.inferenceMs
@@ -555,8 +760,11 @@ export const useMonitorStore = defineStore('monitor', () => {
     feature.value = null
     badSince = goodSince = null
     badReason = null
+    badReasonCandidate = null
+    badReasonCandidateSince = null
     badGapStarted = null
     badConfirmedBeforeGap = false
+    syncDisplay(calibrationStart, true)
   }
 
   function finishCalibration() {
@@ -579,23 +787,25 @@ export const useMonitorStore = defineStore('monitor', () => {
       reason.value = '参考坐姿已建立，继续专注吧'
       feature.value = null
       lastSmooth = 0
+      syncDisplay(performance.now(), true)
       void queueSave(() => storage.saveCalibration(result)).then(saved => { if (!saved) announce('参考仅在本次运行有效', '校准未能写入本机，请检查存储。', 'error') })
       const coverage = []
       if (settings.value.headPoseEnabled && !result.faceBaseline) coverage.push('人脸参考不足，头姿实验功能暂不可用')
       if (result.baseline.headPitch == null) coverage.push('鼻耳位置未持续清晰，头部俯仰参考未启用')
-      if (result.view === 'side' && result.baseline.torsoHeight == null && result.baseline.torso == null) coverage.push('髋部参考不足，含胸与上身下沉检测未启用')
-      announce('校准完成', coverage.length ? coverage.join('；') + '。其余检测继续工作。' : result.baseline.torsoHeight != null ? '已建立头部俯仰与躯干高度参考。换机位后请重新校准。' : '已建立头肩坐姿参考。换机位后请重新校准。')
+      if (result.view === 'front' && result.baseline.headTilt == null) coverage.push('双耳未持续清晰，歪头检测将使用鼻肩偏移兜底')
+      announce('校准完成', coverage.length ? coverage.join('；') + '。其余检测继续工作。' : '已建立头肩与驼背参考坐姿。换机位后请重新校准。')
     } catch (failure) {
       phase.value = 'ready'
       state.value = 'need_cal'
       calibrationProgress.value = 0
       reason.value = failure instanceof Error ? failure.message : '校准未完成，请再试一次。'
+      syncDisplay(performance.now(), true)
       announce('再调整一下', reason.value, 'error')
     }
   }
 
   function pause(message = '监测已暂停，摄像头已关闭') {
-    if (busy.value) { void endSession(); reason.value = message; return }
+    if (busy.value) { void endSession(); reason.value = message; syncDisplay(performance.now(), true); return }
     if (!running.value) return
     tick()
     phase.value = 'paused'
@@ -607,6 +817,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     calibrationBuffer = []
     calibrationTimestamps = []
     resetDynamics()
+    syncDisplay(performance.now(), true)
     closeRest()
     void persist()
   }
@@ -639,6 +850,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     demo.value = false
     resetDynamics()
     reason.value = '本次监测已结束'
+    syncDisplay(performance.now(), true)
     if (ended) {
       ended.endedAt = Date.now()
       if (ended.mode === 'demo') {
@@ -663,6 +875,13 @@ export const useMonitorStore = defineStore('monitor', () => {
 
   function previewSound() { void playCue(true) }
 
+  function sendExternalNotification(title: string, message: string, tag: string) {
+    if (desktopRuntime.value) void window.pineaseDesktop?.notify(title, message)
+    if (!desktopRuntime.value && settings.value.notificationsEnabled && !demo.value && 'Notification' in window && Notification.permission === 'granted') {
+      try { new Notification(title, { body: message, tag, icon: new URL(import.meta.env.BASE_URL + 'icon.svg', window.location.href).href }) } catch { /* 页面提醒继续可用 */ }
+    }
+  }
+
   function remind(kind: ReminderKind, message: string) {
     const now = performance.now()
     const cooldown = kind === 'eyes' ? 300 : settings.value.cooldownSeconds
@@ -671,10 +890,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     session.value?.reminders.push({ at: Date.now(), kind, message })
     announce(kind === 'posture' ? '坐得舒服一些' : kind === 'eyes' ? '给眼睛一点休息' : '该活动一下了', message, 'reminder')
     void playCue()
-    if (desktopRuntime.value) void window.pineaseDesktop?.notify('PinEase · 青松坐姿', message)
-    if (!desktopRuntime.value && settings.value.notificationsEnabled && !demo.value && 'Notification' in window && Notification.permission === 'granted') {
-      try { new Notification('PinEase · 青松坐姿', { body: message, tag: 'pinease-' + kind, icon: new URL(import.meta.env.BASE_URL + 'icon.svg', window.location.href).href }) } catch { /* 页面提醒继续可用 */ }
-    }
+    sendExternalNotification('PinEase · 青松坐姿', message, 'pinease-' + kind)
     if (kind === 'break' || kind === 'posture' && settings.value.focusReminder) {
       restKind.value = kind
       restRemaining.value = settings.value.restSeconds
@@ -722,9 +938,15 @@ export const useMonitorStore = defineStore('monitor', () => {
     const needsRestart = next.view !== settings.value.view || next.cameraId !== settings.value.cameraId || next.cameraFacingMode !== settings.value.cameraFacingMode || next.blinkEnabled !== settings.value.blinkEnabled || next.headPoseEnabled !== settings.value.headPoseEnabled || next.modelPreference !== settings.value.modelPreference || next.fps !== settings.value.fps
     if (needsRestart && (running.value || phase.value === 'paused' || busy.value)) await endSession()
     const breakChanged = next.sitMinutes !== settings.value.sitMinutes || next.breakEnabled !== settings.value.breakEnabled
+    const pomodoroDurationChanged = next.pomodoroFocusMinutes !== settings.value.pomodoroFocusMinutes
+      || next.pomodoroShortBreakMinutes !== settings.value.pomodoroShortBreakMinutes
+      || next.pomodoroLongBreakMinutes !== settings.value.pomodoroLongBreakMinutes
     settings.value = next
     if (next.soundEnabled) prepareAudio()
     if (breakChanged) nextBreak = next.sitMinutes * 60
+    if (pomodoroDurationChanged && pomodoro.value.status === 'idle') {
+      pomodoro.value = resetPomodoroState(pomodoro.value, pomodoroConfigFromSettings(next))
+    }
     const saved = await queueSave(() => storage.saveSettings({ ...next }))
     if (!saved) announce('设置仅在当前页面生效', '本机存储失败，请检查存储空间并导出备份。', 'error')
     else if (needsRestart) announce('设置已保存', '下次开始监测时使用新的设置。')
@@ -788,7 +1010,7 @@ export const useMonitorStore = defineStore('monitor', () => {
       '# 青松坐姿（PinEase）设备端推理视觉姿态识别系统评测记录',
       '',
       `- 生成时间：${new Date().toLocaleString('zh-CN')}`,
-      `- 运行环境：${desktopRuntime.value ? 'Windows Electron 桌面端' : 'Web 浏览器端'}`,
+      `- 运行环境：${desktopRuntime.value ? 'Windows Tauri 桌面端' : 'Web 浏览器端'}`,
       `- 识别引擎与模型：${engine.value || settings.value.modelPreference}（设定帧率 ${settings.value.fps} FPS，机位：${settings.value.view === 'front' ? '正面' : '侧面'}）`,
       `- 暗光/逆光自适应补偿：${settings.value.lowLightBoost ? '已开启' : '未开启'}（当前环境亮度 Luma=${lighting.value.luma}，状态：${lighting.value.status}）`,
       '',
@@ -841,10 +1063,85 @@ export const useMonitorStore = defineStore('monitor', () => {
     frameHeight.value = height
   }
 
+  function stopPomodoroTimer() {
+    if (pomodoroTimer !== null) window.clearInterval(pomodoroTimer)
+    pomodoroTimer = null
+  }
+
+  function syncPomodoroTimer() {
+    if (pomodoro.value.status === 'running') {
+      if (pomodoroTimer === null) {
+        pomodoroLastTick = performance.now()
+        pomodoroTimer = window.setInterval(tickPomodoro, 1000)
+      }
+    } else {
+      stopPomodoroTimer()
+    }
+  }
+
+  function handlePomodoroEvent(event: 'focus_complete' | 'break_complete' | null) {
+    if (!event) return
+    void playCue()
+    if (event === 'focus_complete') {
+      const nextMinutes = Math.round(pomodoro.value.totalSeconds / 60)
+      const kindLabel = pomodoro.value.phase === 'long_break' ? '长休息' : '短休息'
+      const body = `已完成第 ${pomodoro.value.completedCount} 个番茄专注，进入${kindLabel}（${nextMinutes} 分钟）。`
+      announce('番茄专注完成', body, 'reminder')
+      sendExternalNotification('PinEase · 番茄专注完成', body, 'pinease-pomodoro-focus')
+    } else {
+      const body = '休息时间结束，准备好开始下一轮专注了。'
+      announce('休息结束', body, 'reminder')
+      sendExternalNotification('PinEase · 番茄休息结束', body, 'pinease-pomodoro-break')
+    }
+  }
+
+  function tickPomodoro() {
+    const now = performance.now()
+    const dt = Math.max(0, Math.min((now - pomodoroLastTick) / 1000, 5))
+    pomodoroLastTick = now
+    const result = tickPomodoroState(pomodoro.value, dt, pomodoroConfigFromSettings(settings.value))
+    pomodoro.value = result.state
+    syncPomodoroTimer()
+    handlePomodoroEvent(result.event)
+  }
+
+  function startPomodoro() {
+    if (settings.value.soundEnabled) prepareAudio()
+    pomodoro.value = startPomodoroState(pomodoro.value)
+    pomodoroLastTick = performance.now()
+    syncPomodoroTimer()
+  }
+
+  function pausePomodoro() {
+    pomodoro.value = pausePomodoroState(pomodoro.value)
+    syncPomodoroTimer()
+  }
+
+  function resetPomodoro() {
+    pomodoro.value = resetPomodoroState(pomodoro.value, pomodoroConfigFromSettings(settings.value))
+    syncPomodoroTimer()
+  }
+
+  function skipPomodoro() {
+    const result = advancePomodoroState(pomodoro.value, pomodoroConfigFromSettings(settings.value), false)
+    pomodoro.value = result.state
+    syncPomodoroTimer()
+  }
+
+  function choosePomodoroPhase(target: PomodoroPhase) {
+    if (pomodoro.value.status === 'running') return
+    pomodoro.value = selectPomodoroPhase(pomodoro.value, target, pomodoroConfigFromSettings(settings.value))
+    syncPomodoroTimer()
+  }
+
   async function handleDesktopCommand(command: 'pause' | 'resume' | 'quit') {
-    if (command === 'pause') pause('电脑锁定或进入睡眠，监测已暂停')
+    if (command === 'pause') {
+      pause('电脑锁定或进入睡眠，监测已暂停')
+      if (pomodoro.value.status === 'running') pausePomodoro()
+    }
     if (command === 'resume') await resume()
     if (command === 'quit') {
+      stopPomodoroTimer()
       await endSession()
       window.pineaseDesktop?.readyToQuit()
     }
@@ -868,13 +1165,14 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   return {
-    settings, profiles, sessions, records, realRecords, phase, state, reason, error, storageWarning, initialized, busy, running, desktopRuntime,
+    settings, profiles, sessions, records, realRecords, phase, state, reason, displayState, displayReason, displayChannels, displayQuality, error, storageWarning, initialized, busy, running, desktopRuntime,
     demo, demoPose, stream, landmarks, frameWidth, frameHeight, quality, inferenceMs, engine, poseModel, devices,
     calibrationProgress, calibrationSamples, feature, channels, deviation, session, today, elapsed, profile,
     continuousSeconds, headPoseAvailable, headPose, headPoseDelta, blinkRate, blinkAvailable, blinkCount, blinkObservedSeconds, blinkStatus, toast, restOpen, restRemaining, restKind, stateLabel, stateColor,
-    eyeCareActive, lighting, performanceStats, evalMetrics, exerciseActive, exerciseStep, exerciseProgress,
+    eyeCareActive, lighting, performanceStats, evalMetrics, exerciseActive, exerciseStep, exerciseProgress, debugMode, testActionTag, telemetryCount,
+    pomodoro, pomodoroOnBreak, startPomodoro, pausePomodoro, resetPomodoro, skipPomodoro, choosePomodoroPhase,
     init, startCamera, startDemo, beginCalibration, pause, resume, endSession, updateSettings, refreshDevices,
     requestNotifications, testDesktopNotification, resetProfiles, exportBackup, exportCSV, exportOrgReport, exportEvaluationReport, importBackup, deleteHistory, dismissToast,
-    closeRest, announce, previewSound, funMoment, dismissFun, bindCameraPreview, updateVideoSize, handleDesktopCommand, toggleEyeCare, startNeckExercise,
+    closeRest, announce, previewSound, funMoment, dismissFun, bindCameraPreview, updateVideoSize, handleDesktopCommand, toggleEyeCare, startNeckExercise, clearTelemetryLog,
   }
 })

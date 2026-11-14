@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "electron/main.cjs",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
+    "test:rust": "node scripts/cargo-cli.mjs test",
     "dev": "vite --port 5180",
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "build:icon": "node scripts/build-icon.mjs",
@@ -13,14 +13,17 @@
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
-    "build:desktop": "npm run build && electron-builder --win nsis --x64",
-    "desktop:run": "npm run build-only && electron .",
+    "tauri": "node scripts/tauri-cli.mjs",
+    "desktop:dev": "node scripts/tauri-cli.mjs dev",
+    "desktop:run": "node scripts/tauri-cli.mjs dev",
+    "build:desktop": "npm run type-check && node scripts/tauri-cli.mjs build",
     "type-check": "vue-tsc --build",
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.1.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/api": "^2",
     "echarts": "^6.1.0",
     "idb": "^8.0.4",
     "lucide-vue-next": "^0.577.0",
@@ -31,12 +34,11 @@
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@tsconfig/node24": "^24.0.5",
     "@types/node": "^24.13.4",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/tsconfig": "^0.9.1",
-    "electron": "^45.0.0",
-    "electron-builder": "^26.18.0",
     "npm-run-all2": "^9.0.3",
     "prettier": "3.9.6",
     "sharp": "^0.35.5",
@@ -47,28 +49,5 @@
   },
   "engines": {
     "node": "^22.18.0 || >=24.12.0"
-  },
-  "build": {
-    "appId": "cn.pinease.desktop",
-    "productName": "PinEase",
-    "asar": true,
-    "files": [
-      "dist/**",
-      "electron/**",
-      "package.json"
-    ],
-    "directories": {
-      "output": "release"
-    },
-    "win": {
-      "icon": "public/favicon.ico",
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
-    }
   }
 }

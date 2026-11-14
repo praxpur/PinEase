@@ -50,11 +50,17 @@ export interface Settings {
   eyeCareAuto: boolean
   lowLightBoost: boolean
   fps: number
+  pomodoroEnabled: boolean
+  pomodoroFocusMinutes: number
+  pomodoroShortBreakMinutes: number
+  pomodoroLongBreakMinutes: number
+  pomodoroLongInterval: number
+  pomodoroAutoStartBreak: boolean
+  pomodoroAutoStartFocus: boolean
 }
 
 export interface Features {
   neck: number | null
-  torso: number | null
   drop: number
   shift: number
   shoulders: number
@@ -62,16 +68,16 @@ export interface Features {
   side: TrackingSide
   // Optional for profiles saved before vertical posture measurements were introduced.
   headPitch?: number | null
+  headTilt?: number | null
   neckHeight?: number | null
-  torsoHeight?: number | null
 }
 
 export interface Calibration {
   faceBaseline?: { pitch: number; yaw: number; roll: number } | null
   featureVersion?: number
   poseModel?: 'full' | 'lite'
-  calibrationNoise?: Partial<Record<'drop' | 'shift' | 'shoulders' | 'scale' | 'neck' | 'torso' | 'headPitch' | 'neckHeight' | 'torsoHeight', number>>
-  channelCoverage?: Partial<Record<'headPitch' | 'neckHeight' | 'torsoHeight' | 'torso', number>>
+  calibrationNoise?: Partial<Record<'drop' | 'shift' | 'shoulders' | 'scale' | 'neck' | 'headPitch' | 'headTilt' | 'neckHeight', number>>
+  channelCoverage?: Partial<Record<'headPitch' | 'headTilt' | 'neckHeight', number>>
   id: string
   view: ViewMode
   cameraId: string
@@ -88,7 +94,7 @@ export interface Observation {
   reason: string
   features: Features | null
   quality: number
-  channelQuality?: Partial<Record<'headPitch' | 'neckHeight' | 'torsoHeight' | 'neckAngle' | 'torsoAngle' | 'shoulderTilt' | 'headShift' | 'proximity', number>>
+  channelQuality?: Partial<Record<'headPitch' | 'headTilt' | 'neckHeight' | 'neckAngle' | 'shoulderTilt' | 'headShift' | 'proximity', number>>
 }
 
 export interface StateSegment {
@@ -180,6 +186,13 @@ export const DEFAULT_SETTINGS: Settings = {
   eyeCareAuto: true,
   lowLightBoost: true,
   fps: 12,
+  pomodoroEnabled: true,
+  pomodoroFocusMinutes: 25,
+  pomodoroShortBreakMinutes: 5,
+  pomodoroLongBreakMinutes: 15,
+  pomodoroLongInterval: 4,
+  pomodoroAutoStartBreak: true,
+  pomodoroAutoStartFocus: false,
 }
 
 export const STATE_LABELS: Record<PostureState, string> = {

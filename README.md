@@ -1,7 +1,6 @@
 # PinEase · 青松坐姿
 
-一个安静的桌边坐姿提醒。
-
+一个安静的桌边坐姿与用眼健康助手，支持浏览器直接运行与基于 **Tauri v2** 的轻量级 Windows 桌面客户端。
 
 ## 最快启动
 
@@ -12,52 +11,41 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
+启动桌面端开发环境（需本机已配置 Rust 与 Windows WebView2）：
+
+```powershell
+npm.cmd run desktop:run
+```
+
 ## 第一次使用
 
-1. 点击 **开始监测**，本人允许浏览器使用摄像头。
-2. 让头部与双肩进入画面。侧面模式需要看清一侧耳朵与肩膀。
+1. 点击 **开始监测**，允许浏览器或桌面端使用摄像头。
+2. 让头部与双肩进入画面；侧面模式需要看清一侧耳朵与肩膀。
 3. 舒适地坐好，点击 **开始 8 秒校准**，尽量保持稳定。
 4. 校准成功后进入监测。短暂偏离先进入候选状态，持续达到设置的时间才提醒。
-5. **暂停**会关闭摄像头并停止有效计时；**继续**重新打开设备。
-6. **结束本次**会保存记录。到历史页查看趋势与提醒。
-7. 换机位、摄像头或画面比例后重新校准。
+5. 可按需开启 **番茄钟模式**，在专注时段同步监测坐姿，进入短休或长休时自动静默坐姿与久坐提醒。
+6. **暂停** 会关闭摄像头并停止有效计时；**继续** 重新打开设备。
+7. **结束本次** 会保存记录，可到历史页查看健康评分、趋势与提醒明细。
+8. 换机位、摄像头或画面比例后建议重新校准。
 
-不是越僵直越好。参考值来自你在这个机位下的舒适坐姿，软件用于日常姿态觉察，不提供医学诊断。
-
-## 不开摄像头也能展示
-
-点击 **先体验一下**：
-
-- 不请求摄像头，不加载识别模型。
-- 可以切换舒适坐姿、持续低头、离开座位，展示候选异常、持续提醒、恢复和计时。
-- 默认持续偏离 6 秒才触发坐姿提醒。
-- 演示记录仅保存在当前页面的内存中，与真实历史分开。
-- 历史页的 **看看示例记录**提供明确标注的七天模拟数据。
-- 页面关闭后演示记录消失，真实记录仍在浏览器中。
-
-现场先展示演示流程，再由参与者自己授权真实摄像头。演示数据不能当成识别实验结果。
+> 不是越僵直越好。参考值来自你在这个机位下的舒适坐姿，软件用于日常姿态觉察，不提供医学诊断。
 
 ## 已实现的功能
 
 | 功能 | 实现方式 |
 | --- | --- |
-| 摄像头启动、选择、暂停、继续、结束 | getUserMedia；暂停和结束释放视频轨道 |
-| 本地关键点识别 | MediaPipe Tasks Pose Landmarker，Worker 内执行 |
-| 正面与侧面模式 | 分别保存相同摄像头下的参考参数 |
-| 个体校准 | 8 秒、多帧中位数、至少 20 个主导侧有效样本、稳定性检查 |
-| 姿态判定 | 统一像素尺度的几何特征，与个人参考作相对比较 |
-| 短时动作过滤 | 指数平滑、持续时间、恢复保持、滞回与提醒冷却 |
-| 未识别与离座 | 低质量返回未知；连续 5 秒无姿态结果时标记未检测到人 |
-| 有效监测与久坐计时 | 可靠可判定时长累计；暂停、未知、离座单列；离座重置久坐累计 |
-| 页面休息提示 | 可退出倒计时；用户手动点击可请求浏览器全屏 |
-| 声音与通知 | 默认关闭，由用户开启；页面提醒始终可用 |
-| 可选眨眼参考 | Face Landmarker blendshapes，清晰人脸下的近期频率估计 |
-| 历史与趋势 | 日记录、7/30 天 ECharts 图表、单次提醒详情 |
-| 本地保存 | IndexedDB，周期保存会话、保存参数与参考坐姿 |
-| 数据管理 | JSON 备份导入/导出、30 天 CSV 汇总、明确确认后清除 |
-| 演示模式 | 模拟状态交互与示例历史，隔离真实记录 |
-| 响应式与可访问控件 | 桌面/窄屏布局、键盘焦点、Reka UI 弹窗与开关 |
-| 安装与缓存 | Web manifest；生产模式 Service Worker 缓存已访问资源 |
+| 摄像头启动、选择、暂停、继续、结束 | `getUserMedia`；暂停和结束立即释放视频轨道 |
+| 本地关键点识别 | MediaPipe Tasks Pose Landmarker（Lite / Full），Web Worker 内离屏推理 |
+| 正面与侧面模式 | 分别保存同一摄像头下的参考参数，专注于头部与双肩几何关系 |
+| 个体校准 | 8 秒采样、多帧中位数、至少 20 个有效样本与稳定性校验 |
+| 姿态判定与防抖 | 统一像素尺度的相对几何特征，结合指数平滑、持续时间、滞回与冷却 |
+| 头部姿态与眨眼参考 | 可选 Face Landmarker（blendshapes 眨眼频率估计 + 头部俯仰/偏航/滚转参考） |
+| 番茄钟模式 | 专注 / 短休 / 长休三阶段循环、阶段切换、进度条、到点提醒、休息期静默姿态/久坐弹窗 |
+| 久坐、护眼与微运动 | 久坐/护眼休息倒计时、屏幕护眼滤镜、低光增益（Gamma LUT）、颈部微运动引导 |
+| 历史、健康评分与导出 | 日健康评分、7/30 天 ECharts 趋势图、单次提醒详情、JSON 备份导入/导出、CSV 与评测汇总导出 |
+| 本地保存 | IndexedDB（`idb`）持久化会话记录、配置项与个人校准基线 |
+| 演示模式 | 无需摄像头即可体验状态流转与 7 天示例历史，与真实记录完全隔离 |
+| Tauri v2 桌面端 | 轻量原生窗口与无边框主题同步标题栏、系统托盘常驻、锁屏/休眠自动暂停监测与番茄钟 |
 
 界面选用暖白、深绿、细边框与留白，参考 [Plumb](https://plumbcoach.com/)、[PostureKind](https://posturekind.com/)、[NeckCure](https://neckcure.easyfox.org/zh-cn/) 的简洁表达；布局、图标组合、插画和文案在本项目中重新实现。
 
@@ -65,123 +53,108 @@ npm.cmd run dev
 
 ## 实际边界
 
-- **浏览器页面**：不控制系统亮度，不遮挡其他应用，不提供系统级常驻悬浮窗。
-- **后台行为**：页面转入后台会暂停并关闭摄像头，回来后由用户继续。
-- **识别含义**：是相对参考的几何代理，不测量真实脊柱形态，也不判断注意力或是否在操作电脑。
-- **正面前移**：使用头肩位置与肩宽变化等代理，可能受镜头、身体移动与转头影响。
-- **离座状态**：依据连续无姿态结果定义；相机没拍到人也可能是离开视野，不是独立座位传感器。
-- **遮挡/侧面**：必要关键点不可靠时暂不判定；髋部不可见时不输出相应躯干判断。
-- **眨眼**：采样率、眼镜、光线与脸部角度会影响估计。有效观察不足时显示空值，不报成零次。
-- **数据安全**：不上传、不保存画面和逐帧关键点；参考汇总参数与状态区间会保存在当前浏览器。清除浏览器数据会删除它们。
-- **资源**：模型和 WASM 已随目录准备，运行时从本地站点读取；缓存能力取决于浏览器与已有缓存。
-
-本次已通过 TypeScript 检查与生产构建，并查看了默认监控页面的实际预览。未使用你的摄像头验证误报、漏报、眨眼精度或设备功耗；这些应由团队在实际机位记录。
+- **本地推理与隐私**：不上传、不保存摄像头原始画面和逐帧关键点；汇总记录、偏好设置与参考坐姿仅保存在当前浏览器或桌面端本地存储中。
+- **浏览器与桌面端差异**：浏览器版不控制系统亮度，不提供系统级常驻悬浮窗，页面切后台时会暂停并释放摄像头；桌面版支持托盘常驻与锁屏/休眠监听。
+- **识别含义**：采用头肩及面部几何特征作为相对个人基准的代理指标，不测量真实脊柱形态，也不用于医学诊断。
+- **遮挡与离座**：必要关键点（如双肩、鼻、耳）不可靠时标记为未知并暂停判定；连续无有效姿态时标记离座并重置久坐累计。
+- **眨眼与低光**：采样率、眼镜反光、光线与人脸角度会影响眨眼与面部估计；有效观察不足时显示空值，不虚报为零次。
 
 ## 技术栈
 
-- Vue 3、TypeScript、Vite、Vue Router、Pinia。
-- Tailwind CSS v4：样式构建。
-- Reka UI：弹窗与开关的行为、焦点和可访问性。
-- Lucide Vue：图标。
-- Apache ECharts：趋势图。
-- MediaPipe Tasks Vision：姿态与可选人脸关键点。
-- idb / IndexedDB：本地数据。
+- **前端**：Vue 3、TypeScript、Vite 8、Vue Router、Pinia
+- **样式与组件**：Tailwind CSS v4、Reka UI、Lucide Vue、Apache ECharts
+- **本地视觉推理**：MediaPipe Tasks Vision（Pose Landmarker + Face Landmarker）
+- **桌面端外壳**：Tauri v2（Rust + Windows WebView2 + NSIS 安装包）
+- **本地存储**：`idb` / IndexedDB
 
 ## 项目架构
 
 ```text
 src/
-├─ App.vue                    页面框架、导航、提醒与隐私说明
+├─ App.vue                      页面框架、主题/标题栏同步、导航与提醒弹窗
 ├─ views/
-│  ├─ MonitorView.vue         监控与校准流程
-│  ├─ HistoryView.vue         趋势与会话详情
-│  └─ SettingsView.vue        摄像头、提醒与数据设置
+│  ├─ MonitorView.vue           实时监测、校准流程与番茄钟卡片
+│  ├─ HistoryView.vue           健康评分、趋势图、会话详情与导出
+│  └─ SettingsView.vue          摄像头、模型、提醒、番茄钟与数据管理设置
 ├─ components/
-│  ├─ CameraPreview.vue       预览与骨架连线
-│  ├─ PostureIllustration.vue 本项目的 SVG 坐姿示意
-│  ├─ TrendChart.vue          ECharts 封装
-│  └─ ui/                    Reka UI 基础控件
+│  ├─ CameraPreview.vue         摄像头预览、骨架绘制与低光提示
+│  ├─ PomodoroCard.vue          番茄钟计时器、阶段切换与完成统计
+│  ├─ PostureIllustration.vue   正面/侧面坐姿 SVG 示意图
+│  ├─ TrendChart.vue            ECharts 趋势图封装
+│  └─ ui/                       Reka UI 基础弹窗与开关控件
 ├─ domain/
-│  ├─ types.ts                数据结构与默认参数
-│  └─ posture.ts              质量过滤、特征、校准与分类
-├─ stores/monitor.ts          生命周期、状态机、计时、提醒
-├─ workers/vision.worker.ts   姿态/人脸模型推理
+│  ├─ types.ts                  数据结构、状态定义与默认参数
+│  ├─ posture.ts                质量过滤、特征提取、校准与姿态分类
+│  ├─ pomodoro.ts               番茄钟三阶段状态机与轮次计数
+│  ├─ blink.ts                  眨眼周期检测与频率估计
+│  └─ fun.ts                    彩蛋动作检测
+├─ stores/monitor.ts            核心生命周期、计时、番茄钟联动与提醒调度
+├─ workers/vision.worker.ts     MediaPipe 姿态/人脸模型推理 Worker
 ├─ lib/
-│  ├─ vision.ts               摄像头与 Worker 通信
-│  ├─ storage.ts              数据库存储与备份校验
-│  ├─ format.ts               时间、汇总、导出工具
-│  └─ demo.ts                 明确标注的模拟数据
-└─ assets/app.css             视觉样式
+│  ├─ desktop.ts                Tauri v2 桌面端桥接（窗口、托盘、通知、休眠监听）
+│  ├─ vision.ts                 摄像头调度与 Worker 通信
+│  ├─ vision-options.ts         模型组合与硬件回退策略
+│  ├─ head-pose.ts              面部矩阵旋转角解析与关联校验
+│  ├─ lighting.ts               画面亮度分析与 Gamma LUT 提亮
+│  ├─ audio.ts                  Web Audio 提示音合成与试听
+│  ├─ storage.ts                IndexedDB 存储、设置校验与备份导入/导出
+│  ├─ format.ts                 时长格式化、健康评分、汇总与导出工具
+│  └─ demo.ts                   演示状态与示例历史数据
+└─ assets/app.css               全局主题与页面样式
+src-tauri/
+├─ Cargo.toml                   Rust 依赖与 Release 优化配置
+├─ tauri.conf.json              窗口、打包与 CSP 安全策略配置
+└─ src/
+   ├─ lib.rs                    Tauri 命令、系统托盘与单实例控制
+   ├─ permissions.rs            受信任来源与摄像头权限控制
+   └─ windows_hooks.rs          Windows 锁屏/休眠消息钩子
 public/
-├─ models/                    官方模型及来源/校验记录
-├─ wasm/                      MediaPipe WASM
+├─ models/                      官方模型及来源/校验记录
+├─ wasm/                        MediaPipe WASM 运行时
+├─ theme-init.js                首屏主题初始化脚本（兼容严格 CSP）
 ├─ manifest.webmanifest
 └─ sw.js
-scripts/prepare-assets.mjs     模型下载与 WASM 复制
-docs/实现说明.md               算法、计时、隐私和后续开发
+scripts/
+├─ prepare-assets.mjs           模型下载与 WASM 复制
+├─ build-icon.mjs               由 SVG 生成桌面端与网页图标
+├─ cargo-cli.mjs / cargo-env.mjs  Rust 工具链环境封装
+└─ tauri-cli.mjs                Tauri CLI 与构建前占用清理封装
+docs/                           实现说明与专项检查文档
+tests/                          Node 单元测试与视觉加载冒烟页
 ```
 
-建议阅读顺序：`types.ts → posture.ts → monitor.ts → MonitorView.vue → storage.ts → HistoryView.vue → vision.ts / worker`。
+建议阅读顺序：`types.ts → posture.ts → pomodoro.ts → monitor.ts → MonitorView.vue → storage.ts → vision.ts / worker`。
 
+## 构建、测试与桌面打包
 
-## 在另一台电脑准备
-
-推荐 Node.js 24 LTS，最低版本要求见 package.json。复制本目录时，可以排除 `node_modules`、`.npm-cache`、`dist`，保留源码和 `public/models`、`public/wasm`。
-
-```powershell
-npm.cmd ci --registry=https://registry.npmmirror.com --cache .npm-cache --no-audit --no-fund
-npm.cmd run dev
-```
-
-需要重新下载模型时：
+### 网页端测试与构建
 
 ```powershell
-npm.cmd run prepare:assets
-```
-
-模型来自 Google 官方地址；网络需要代理时，按你自己的网络环境设置。已经随目录准备的模型无需再次下载。
-
-## 构建与部署
-
-```powershell
+npm.cmd test
+npm.cmd run type-check
 npm.cmd run build
 npm.cmd run preview -- --host 127.0.0.1
 ```
 
-`dist` 是静态部署目录，包含页面、Worker、模型与 WASM。部署到 HTTPS 静态站点后，用户仍需自己授权摄像头。
+`dist/` 为静态部署目录，包含页面、Worker、模型与 WASM。需要重新拉取模型与 WASM 时运行 `npm.cmd run prepare:assets`。
 
-使用 hash 路由与相对资源路径，可部署到静态子目录。不要漏传模型、WASM 或只打开单个 HTML 文件。生产模式才注册 Service Worker。
-
-## Windows 桌面版
+### Windows 桌面版（Tauri v2）
 
 ```powershell
+npm.cmd run test:rust
 npm.cmd run desktop:run
 npm.cmd run build:desktop
 ```
 
-第一条命令构建网页并以 Electron 启动；第二条生成 Windows x64 NSIS 安装包，输出在 `release/`。桌面图标由 `public/icon.svg` 生成多尺寸 `public/favicon.ico`，运行 `npm.cmd run build:icon` 可单独更新；构建时也会自动更新。标题栏与当前日间/夜间主题同步，顶部空白可拖动窗口，右上角保留 Windows 窗口按钮。桌面版将识别模型和 WASM 随应用打包，首次启动时仍需允许摄像头。关闭窗口会将应用留在托盘，电脑锁定或睡眠时暂停监测；退出应用会先保存当前记录。
+- `desktop:run`：启动 Vite 开发服务并拉起 Tauri 桌面窗口。
+- `build:desktop`：执行类型检查、前端生产构建并编译打包 Windows 桌面端：
+  - 单文件便携版主程序：`src-tauri/target/release/PinEase.exe`
+  - Windows x64 NSIS 安装包：`src-tauri/target/release/bundle/nsis/PinEase_1.0.0_x64-setup.exe`
+- 桌面图标由 `public/icon.svg` 自动生成，运行 `npm.cmd run build:icon` 可单独更新图标资源。
+- 构建脚本会在打包前自动处理旧版运行中残留的 `PinEase.exe` 占用；关闭窗口默认最小化到系统托盘，系统锁定或休眠时自动暂停监测与番茄钟，退出托盘会先保存当前会话记录。
 
-## 继续开发与软著材料
+## 版权与参考说明
 
-- 算法入口是 `domain/posture.ts`。以后可以增加自己的分类器，同时保持质量检查、状态与计时接口一致。
-- GPU 训练适合放在独立实验工程中；这一版使用官方关键点模型和规则判定，没有宣称训练了自己的姿态网络。
-- 默认阈值是工程起点，要用独立人员、机位与光照评估后再调整。
-- 数据结构版本为 1；增加数据库字段时同时维护迁移与导入校验。
-- 本副本包含 AI 辅助实现。团队应保留真实来源与修改记录，并按学校及登记系统的当前要求准备材料。
-- 依赖、模型、项目自身代码的来源分别记录，不能把第三方模型申明为自主训练。
-- 正式申请软件名称、著作权人、开发完成日期与版本仍由团队和老师确认；不要把本目录的版本号当作已经取得的登记成果。
-
-第三方依赖与模型来源见 `THIRD_PARTY_NOTICES.md` 和 `public/models/sources.json`。
-
-
-## 模型加载回归检查
-
-运行开发服务后，打开 `/tests/vision-smoke.html`。该页不申请摄像头权限，使用实际 Worker 加载姿态和眨眼模型，并推理一张人工空白画面。出现 `ready`（`blink: true`）、`frame` 和 `PASS` 表示加载链路通过，不代表真人识别精度。
-
-Worker 使用模块化 WASM，生产构建也保持 ES 模块格式。加载器工厂在每次任务创建前恢复，兼容姿态/人脸双模型及 CPU 重试。
-
-## 机位、声音与眨眼检查
-
-监视框右下方可选正面/侧面机位；切换会结束并保存当前监测，请重新开始使用对应机位参考。未开摄像头时显示对应示意图。设置页可调提示音量、响铃次数并试听。眨眼开启后可查看实际计数和有效观察时长；采样不足时不估算频率。
-
-头部转动/抬头/低头检测的可行方案、当前眨眼修正和真人复测步骤见 [头部动作与眨眼检查](docs/头部动作与眨眼检查.md)。
+- 算法入口位于 `src/domain/posture.ts`，数据结构版本为 `1`。
+- 第三方依赖与官方模型来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 `public/models/sources.json`。
+- 头部转动/抬头/低头检测与眨眼复测说明见 [头部动作与眨眼检查](docs/头部动作与眨眼检查.md)。
